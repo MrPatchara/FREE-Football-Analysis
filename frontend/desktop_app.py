@@ -1,0 +1,5069 @@
+import sys
+import os
+import time
+import threading
+from pathlib import Path
+from typing import Optional, List, Dict
+import numpy as np
+import cv2
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QCheckBox, QLabel, QFileDialog, QRadioButton,
+    QButtonGroup, QTextEdit, QTabWidget, QGroupBox, QScrollArea,
+    QProgressBar, QMessageBox, QSplitter, QFrame, QSlider, QComboBox,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
+    QSpinBox, QListWidget, QListWidgetItem, QDialog, QDialogButtonBox,
+    QGraphicsOpacityEffect
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+# Get the project root directory
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Add parent directory to path to import main module
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from main import process_video
+
+# Import manual tracking module
+try:
+    from frontend.manual_tracking import ManualTrackingData, TrackingEvent
+except ImportError:
+    # If import fails, create dummy classes
+    class ManualTrackingData:
+        def __init__(self):
+            self.events = []
+    class TrackingEvent:
+        pass
+from frontend.manual_tracking import ManualTrackingData, TrackingEvent
+
+
+class VideoProcessingThread(QThread):
+    """Thread for processing video without freezing UI"""
+    finished = pyqtSignal(bool, str)  # (success, output_path)
+    progress = pyqtSignal(str)
+    
+    def __init__(self, video_path: str, classes: list, verbose: bool = True):
+        super().__init__()
+        self.video_path = video_path
+        self.classes = classes
+        self.verbose = verbose
+        self.tracks = None  # Store tracks data for heat maps
+        self.frames = None  # Store video frames for field size
+        self.fps = 30  # Store fps for movement analysis
+    
+    def run(self):
+        try:
+            self.progress.emit("กำลังประมวลผลวิดีโอ...")
+            # Reset logs before processing
+            self.reset_logs()
+            # Read video frames first to get dimensions
+            from utils import read_video
+            self.frames, self.fps, _, _ = read_video(self.video_path, self.verbose)
+            output_path, self.tracks = process_video(self.video_path, self.classes, self.verbose, return_tracks=True)
+            self.progress.emit("ประมวลผลเสร็จสิ้น!")
+            self.finished.emit(True, output_path)
+        except Exception as e:
+            self.progress.emit(f"เกิดข้อผิดพลาด: {str(e)}")
+            self.finished.emit(False, "")
+    
+    def reset_logs(self):
+        """Clear log files"""
+        log_files = [
+            os.path.join(PROJECT_ROOT, "logs", "tracking.log"),
+            os.path.join(PROJECT_ROOT, "logs", "camera_movement.log"),
+            os.path.join(PROJECT_ROOT, "logs", "memory_access.log")
+        ]
+        for log_file in log_files:
+            try:
+                if os.path.exists(log_file):
+                    with open(log_file, 'w') as f:
+                        f.write("")  # Clear log file
+            except Exception:
+                pass
+
+
+class VideoPlayerWidget(QWidget):
+    """Custom video player widget with controls"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        
+        self.init_ui()
+        self.setup_connections()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Video display
+        self.video_widget = QVideoWidget()
+        self.video_widget.setStyleSheet("background-color: #000000;")
+        self.media_player.setVideoOutput(self.video_widget)
+        layout.addWidget(self.video_widget)
+        
+        # Controls panel - single line, minimal height
+        controls_frame = QFrame()
+        controls_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2b2b2b;
+                padding: 2px 8px;
+            }
+        """)
+        controls_frame.setFixedHeight(32)
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setSpacing(6)
+        controls_layout.setContentsMargins(3, 2, 3, 2)
+        
+        # Play/Pause button - smaller
+        self.play_pause_btn = QPushButton("▶")
+        self.play_pause_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                border: none;
+                padding: 2px 10px;
+                border-radius: 3px;
+                font-size: 10pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+        """)
+        self.play_pause_btn.setFixedWidth(50)
+        self.play_pause_btn.setFixedHeight(26)
+        
+        # Time label - smaller
+        self.time_label = QLabel("00:00 / 00:00")
+        self.time_label.setStyleSheet("color: #e0e0e0; font-size: 8pt;")
+        self.time_label.setFixedWidth(90)
+        
+        # Seek slider - thinner
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #555;
+                height: 3px;
+                background: #3a3a3a;
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: #c41e3a;
+                border: 1px solid #c41e3a;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #d63347;
+            }
+            QSlider::sub-page:horizontal {
+                background: #c41e3a;
+                border-radius: 1px;
+            }
+        """)
+        self.seek_slider.setRange(0, 0)
+        
+        # Speed control - smaller
+        speed_label = QLabel("ความเร็ว:")
+        speed_label.setStyleSheet("color: #e0e0e0; font-size: 8pt;")
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
+        self.speed_combo.setCurrentIndex(3)  # Default 1.0x
+        self.speed_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 2px 4px;
+                min-width: 65px;
+                max-width: 65px;
+            }
+            QComboBox:hover {
+                border-color: #c41e3a;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                selection-background-color: #c41e3a;
+            }
+        """)
+        self.speed_combo.setFixedHeight(26)
+        
+        # Add all controls to single line
+        controls_layout.addWidget(self.play_pause_btn)
+        controls_layout.addWidget(self.time_label)
+        controls_layout.addWidget(self.seek_slider, 1)
+        controls_layout.addWidget(speed_label)
+        controls_layout.addWidget(self.speed_combo)
+        
+        layout.addWidget(controls_frame)
+    
+    def setup_connections(self):
+        self.play_pause_btn.clicked.connect(self.toggle_play_pause)
+        self.seek_slider.sliderMoved.connect(self.set_position)
+        self.media_player.positionChanged.connect(self.position_changed)
+        self.media_player.durationChanged.connect(self.duration_changed)
+        self.media_player.playbackStateChanged.connect(self.state_changed)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
+        self.speed_combo.currentTextChanged.connect(self.change_speed)
+    
+    def on_media_status_changed(self, status):
+        """Handle media status changes"""
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            # Video loaded, ensure widget is visible
+            self.video_widget.show()
+            self.video_widget.update()
+            # Try to show first frame
+            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                # Pause to show first frame
+                self.media_player.pause()
+    
+    def load_video(self, video_path: str):
+        if os.path.exists(video_path):
+            url = QUrl.fromLocalFile(video_path)
+            # Ensure video widget is visible before loading
+            self.video_widget.show()
+            self.video_widget.setVisible(True)
+            
+            # Set source
+            self.media_player.setSource(url)
+            self.play_pause_btn.setText("▶")
+            
+            # Force widget update
+            self.video_widget.update()
+            
+            # Small delay to ensure media is loaded, then try to show first frame
+            QTimer.singleShot(100, lambda: self.show_first_frame())
+    
+    def show_first_frame(self):
+        """Try to show the first frame of the video"""
+        try:
+            # Set position to 0 to show first frame
+            self.media_player.setPosition(0)
+            # Pause to show frame
+            if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self.media_player.pause()
+            # Force update
+            self.video_widget.update()
+        except:
+            pass
+    
+    def toggle_play_pause(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+            self.play_pause_btn.setText("▶")
+        else:
+            self.media_player.play()
+            self.play_pause_btn.setText("⏸")
+    
+    def set_position(self, position):
+        self.media_player.setPosition(position)
+    
+    def position_changed(self, position):
+        self.seek_slider.setValue(position)
+        self.update_time_label()
+    
+    def duration_changed(self, duration):
+        self.seek_slider.setRange(0, duration)
+        self.update_time_label()
+    
+    def state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.play_pause_btn.setText("⏸")
+        else:
+            self.play_pause_btn.setText("▶")
+    
+    def change_speed(self, speed_text):
+        speed = float(speed_text.replace("x", ""))
+        self.media_player.setPlaybackRate(speed)
+    
+    def update_time_label(self):
+        duration = self.media_player.duration()
+        position = self.media_player.position()
+        
+        duration_str = self.format_time(duration)
+        position_str = self.format_time(position)
+        
+        self.time_label.setText(f"{position_str} / {duration_str}")
+    
+    def format_time(self, milliseconds):
+        seconds = milliseconds // 1000
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+
+
+class PreviewVideoWidget(QWidget):
+    """Preview video widget with controls"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.audio_output.setVolume(0.0)  # Mute preview audio
+        self.media_player.setAudioOutput(self.audio_output)
+        self.is_seeking = False
+        
+        self.init_ui()
+        self.setup_connections()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        # Container frame
+        container = QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a1a;
+                border: 2px solid #555;
+                border-radius: 6px;
+            }
+        """)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        
+        # Video display
+        self.video_widget = QVideoWidget()
+        self.video_widget.setStyleSheet("background-color: #000000; border-radius: 4px;")
+        self.media_player.setVideoOutput(self.video_widget)
+        container_layout.addWidget(self.video_widget)
+        
+        # Controls panel - single line, minimal height (same as VideoPlayerWidget)
+        controls_frame = QFrame()
+        controls_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2b2b2b;
+                padding: 2px 8px;
+            }
+        """)
+        controls_frame.setFixedHeight(32)
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setSpacing(6)
+        controls_layout.setContentsMargins(3, 2, 3, 2)
+        
+        # Play/Pause button - smaller (reduced size slightly)
+        self.play_btn = QPushButton("▶")
+        self.play_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                border: none;
+                padding: 2px 8px;
+                border-radius: 3px;
+                font-size: 9pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+        """)
+        self.play_btn.setFixedWidth(44)
+        self.play_btn.setFixedHeight(24)
+        self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        controls_layout.addWidget(self.play_btn)
+        
+        # Time label - smaller (same as VideoPlayerWidget)
+        self.time_label = QLabel("00:00 / 00:00")
+        self.time_label.setStyleSheet("color: #e0e0e0; font-size: 8pt;")
+        self.time_label.setFixedWidth(90)
+        controls_layout.addWidget(self.time_label)
+        
+        # Seek slider - thinner (same as VideoPlayerWidget)
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #555;
+                height: 3px;
+                background: #3a3a3a;
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: #c41e3a;
+                border: 1px solid #c41e3a;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #d63347;
+            }
+            QSlider::sub-page:horizontal {
+                background: #c41e3a;
+                border-radius: 1px;
+            }
+        """)
+        self.seek_slider.setMinimum(0)
+        self.seek_slider.setMaximum(0)
+        controls_layout.addWidget(self.seek_slider, 1)  # Stretch to fill space
+        
+        container_layout.addWidget(controls_frame)
+        layout.addWidget(container)
+    
+    def setup_connections(self):
+        self.play_btn.clicked.connect(self.toggle_play_pause)
+        self.media_player.playbackStateChanged.connect(self.state_changed)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
+        self.media_player.positionChanged.connect(self.position_changed)
+        self.media_player.durationChanged.connect(self.duration_changed)
+        self.seek_slider.sliderPressed.connect(self.slider_pressed)
+        self.seek_slider.sliderReleased.connect(self.slider_released)
+        self.seek_slider.valueChanged.connect(self.slider_value_changed)
+    
+    def load_video(self, video_path: str):
+        if os.path.exists(video_path):
+            url = QUrl.fromLocalFile(video_path)
+            self.media_player.setSource(url)
+            self.play_btn.setText("▶")
+            self.time_label.setText("00:00 / 00:00")
+    
+    def toggle_play_pause(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+            self.play_btn.setText("▶")
+        else:
+            self.media_player.play()
+            self.play_btn.setText("⏸")
+    
+    def state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.play_btn.setText("⏸")
+        else:
+            self.play_btn.setText("▶")
+    
+    def position_changed(self, position):
+        if not self.is_seeking:
+            self.seek_slider.setValue(position)
+        self.update_time_label()
+    
+    def duration_changed(self, duration):
+        self.seek_slider.setMaximum(duration)
+        self.update_time_label()
+    
+    def slider_pressed(self):
+        self.is_seeking = True
+    
+    def slider_released(self):
+        self.is_seeking = False
+        self.media_player.setPosition(self.seek_slider.value())
+    
+    def slider_value_changed(self, value):
+        if self.is_seeking:
+            self.media_player.setPosition(value)
+            self.update_time_label()
+    
+    def update_time_label(self):
+        position = self.media_player.position()
+        duration = self.media_player.duration()
+        
+        pos_sec = position // 1000
+        dur_sec = duration // 1000 if duration > 0 else 0
+        
+        pos_min = pos_sec // 60
+        pos_sec = pos_sec % 60
+        dur_min = dur_sec // 60
+        dur_sec = dur_sec % 60
+        
+        self.time_label.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")
+    
+    def on_media_status_changed(self, status):
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            pass
+
+
+class FreeFootballAnalysisApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.video_path: Optional[str] = None
+        self.demo_video: Optional[str] = None
+        self.processed = False
+        self.processing_thread: Optional[VideoProcessingThread] = None
+        self.current_output_path: Optional[str] = None
+        self.current_mode = "AI"  # "AI" or "Manual"
+        self.tracks: Optional[Dict] = None  # Store tracking data for heat maps
+        self.video_frames: Optional[List] = None  # Store video frames for field size
+        self.video_fps: int = 30  # Store fps for movement analysis
+        self.current_heat_map_title: Optional[str] = None  # Store current heat map title
+        self.current_heat_map_type: Optional[str] = None  # Store current heat map type
+        self.heat_map_generator: Optional = None  # Store generator reference
+        self.original_field_size: tuple = (1920, 1080)  # Store original field size for full res saving
+        
+        # Initialize tracking data
+        try:
+            self.manual_tracking_data = ManualTrackingData()
+        except:
+            self.manual_tracking_data = None
+        
+        # Store team players
+        self.team1_players: List[Dict[str, str]] = []
+        self.team2_players: List[Dict[str, str]] = []
+        
+        # Professional football analysis event types with outcomes
+        # Format: (action_name, color, [outcomes])
+        # 
+        # คำอธิบาย Outcome:
+        # - "ประตู" = ได้ประตู (Goal)
+        # - "ยิงเข้า" = ยิงเข้าเป้าแต่ไม่ได้ประตู (Shot on Target)
+        # - "ยิงออก" = ยิงออกนอกเป้า (Shot off Target)
+        # - "แอสซิสต์" = ส่งบอลแล้วได้ประตู (Assist - ส่งแล้วได้ประตู)
+        # - "คีย์พาส" = ส่งบอลที่สร้างโอกาสยิง (Key Pass - ส่งแล้วมีโอกาสยิงแต่ไม่ได้ประตู)
+        # - "สำเร็จ" = การกระทำสำเร็จ (Success)
+        # - "ไม่สำเร็จ" = การกระทำไม่สำเร็จ (Failed)
+        #
+        self.default_event_types = [
+            # Attacking Actions
+            ("ยิง", "#FF9800", ["ประตู", "ยิงเข้า", "ยิงออก", "บล็อก", "ถูกเซฟ"]),
+            # หมายเหตุ: "ประตู" = ได้ประตู, "ยิงเข้า" = ยิงเข้าเป้าแต่ไม่ได้ประตู
+            
+            ("ส่งบอล", "#2196F3", ["สำเร็จ", "ไม่สำเร็จ", "แอสซิสต์", "คีย์พาส"]),
+            # หมายเหตุ: "แอสซิสต์" = ส่งแล้วได้ประตู, "คีย์พาส" = ส่งแล้วมีโอกาสยิง
+            
+            ("ข้ามบอล", "#E91E63", ["สำเร็จ", "ไม่สำเร็จ", "แอสซิสต์", "คีย์พาส"]),
+            ("ผ่านบอล", "#9C27B0", ["สำเร็จ", "ไม่สำเร็จ", "แอสซิสต์", "คีย์พาส"]),
+            ("ส่งบอลยาว", "#795548", ["สำเร็จ", "ไม่สำเร็จ", "แอสซิสต์", "คีย์พาส"]),
+            ("ส่งบอลสั้น", "#607D8B", ["สำเร็จ", "ไม่สำเร็จ"]),
+            ("ส่งบอลในเขตโทษ", "#FF5722", ["สำเร็จ", "ไม่สำเร็จ", "แอสซิสต์", "คีย์พาส"]),
+            
+            # Set Pieces
+            ("เตะมุม", "#00BCD4", ["ประตู", "ยิงเข้า", "ยิงออก", "แอสซิสต์", "คีย์พาส", "เคลียร์"]),
+            ("ฟรีคิก", "#FFC107", ["ประตู", "ยิงเข้า", "ยิงออก", "แอสซิสต์", "คีย์พาส", "เคลียร์"]),
+            ("ลูกโทษ", "#F44336", ["ประตู", "ไม่ประตู", "ถูกเซฟ"]),
+            ("ทุ่มบอล", "#607D8B", ["สำเร็จ", "ไม่สำเร็จ"]),
+            
+            # Defensive Actions
+            ("แย่งบอล", "#9C27B0", ["สำเร็จ", "ไม่สำเร็จ", "ฟาวล์"]),
+            ("สกัดบอล", "#9C27B0", ["สำเร็จ", "ไม่สำเร็จ"]),
+            ("เคลียร์บอล", "#795548", ["สำเร็จ", "ไม่สำเร็จ", "อันตราย"]),
+            ("บล็อก", "#FF5722", ["บล็อก", "บล็อกยิง"]),
+            ("เซฟ", "#00BCD4", ["เซฟ", "ไม่เซฟ", "เซฟสำคัญ"]),
+            
+            # Disciplinary
+            ("ฟาวล์", "#F44336", ["ฟาวล์", "ใบเหลือง", "ใบแดง"]),
+            ("ใบเหลือง", "#FFEB3B", ["ใบเหลือง"]),
+            ("ใบแดง", "#E91E63", ["ใบแดง"]),
+            
+            # Other Events
+            ("ออฟไซด์", "#9E9E9E", ["ออฟไซด์"]),
+            ("บอลออก", "#607D8B", ["บอลออก"]),
+            ("เปลี่ยนตัว", "#795548", ["เปลี่ยนตัวเข้า", "เปลี่ยนตัวออก"]),
+            ("บาดเจ็บ", "#FF9800", ["บาดเจ็บ"]),
+            ("เสียบอล", "#F44336", ["เสียบอล"]),
+            ("ครองบอล", "#4CAF50", ["ครองบอล"]),
+        ]
+        
+        # Initialize enabled events (empty by default - user must configure first)
+        self.enabled_events = set()
+        
+        # Auto-refresh timer for logs (refresh every 500ms like terminal)
+        self.log_refresh_timer = QTimer()
+        self.log_refresh_timer.timeout.connect(self.auto_refresh_logs)
+        self.current_log_path = None  # Track currently displayed log file
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        self.setWindowTitle("FREE - Football Analysis")
+        # Make window responsive - use percentage-based sizing
+        self.setMinimumSize(1000, 600)
+        
+        # Central widget - just tabs, no sidebar
+        main_area = self.create_main_area()
+        main_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setCentralWidget(main_area)
+        
+        # Apply dark theme
+        self.apply_dark_theme()
+    
+    def create_sidebar(self):
+        sidebar = QFrame()
+        sidebar.setFrameShape(QFrame.Shape.StyledPanel)
+        
+        layout = QVBoxLayout(sidebar)
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Title
+        title = QLabel("Settings")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #e0e0e0; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Scroll area for sidebar content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c41e3a;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #d63347;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+        
+        # Options group
+        options_group = QGroupBox("Options")
+        options_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(10)
+        
+        self.checkbox_players = QCheckBox("Highlight Players")
+        self.checkbox_players.setChecked(True)
+        options_layout.addWidget(self.checkbox_players)
+        
+        self.checkbox_goalkeepers = QCheckBox("Highlight Goalkeepers")
+        self.checkbox_goalkeepers.setChecked(True)
+        options_layout.addWidget(self.checkbox_goalkeepers)
+        
+        self.checkbox_referees = QCheckBox("Highlight Referees")
+        self.checkbox_referees.setChecked(True)
+        options_layout.addWidget(self.checkbox_referees)
+        
+        self.checkbox_ball = QCheckBox("Highlight Ball")
+        self.checkbox_ball.setChecked(True)
+        options_layout.addWidget(self.checkbox_ball)
+        
+        self.checkbox_stats = QCheckBox("Show Statistics")
+        self.checkbox_stats.setChecked(True)
+        options_layout.addWidget(self.checkbox_stats)
+        
+        options_group.setLayout(options_layout)
+        scroll_layout.addWidget(options_group)
+        
+        scroll_layout.addStretch()
+        
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+        
+        # Separator
+        line3 = QFrame()
+        line3.setFrameShape(QFrame.Shape.HLine)
+        line3.setFrameShadow(QFrame.Shadow.Sunken)
+        line3.setStyleSheet("color: #555;")
+        layout.addWidget(line3)
+        
+        # Start Analysis button
+        self.btn_start = QPushButton("เริ่มวิเคราะห์ (Start Analysis)")
+        self.btn_start.clicked.connect(self.start_analysis)
+        self.btn_start.setEnabled(False)
+        layout.addWidget(self.btn_start)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        
+        return sidebar
+    
+    def create_main_area(self):
+        tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                border-radius: 4px;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #2b2b2b;
+                color: #b0b0b0;
+                padding: 12px 24px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #c41e3a;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #333;
+            }
+        """)
+        
+        # Mode selection
+        mode_tab = self.create_mode_selection_tab()
+        tabs.addTab(mode_tab, "Info")
+        
+        # AI YOLO Mode tabs
+        usage_tab = self.create_usage_tab()
+        tabs.addTab(usage_tab, "AI - Tracking")
+        
+        results_tab = self.create_results_tab()
+        tabs.addTab(results_tab, "Video Preview")
+        
+        # AI Results tab (Heat Maps)
+        ai_results_tab = self.create_ai_results_tab()
+        tabs.addTab(ai_results_tab, "AI - Results")
+        
+        # Manual Tracking tab
+        manual_tracking_tab = self.create_manual_tracking_tab()
+        tabs.addTab(manual_tracking_tab, "Manual Tracking")
+        
+        # Logs tab
+        logs_tab = self.create_logs_tab()
+        tabs.addTab(logs_tab, "Logs")
+        
+        self.tabs = tabs
+        return tabs
+    
+    def create_usage_tab(self):
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(18)
+        
+        # Top row: Options and Video Source side by side
+        top_row = QHBoxLayout()
+        top_row.setSpacing(20)
+        
+        # Options group - left side
+        options_group = QGroupBox("ตัวเลือกการแสดงผล")
+        options_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 13pt;
+                border: 2px solid #555;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 18px;
+                padding-bottom: 12px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+                color: #c41e3a;
+                font-size: 13pt;
+            }
+        """)
+        options_layout = QVBoxLayout()
+        options_layout.setContentsMargins(15, 10, 15, 10)
+        options_layout.setSpacing(12)
+        
+        checkbox_style = """
+            QCheckBox {
+                font-size: 11pt;
+                color: #e0e0e0;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 3px;
+                border: 2px solid #666;
+                background-color: #2b2b2b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #c41e3a;
+            }
+        """
+        
+        self.checkbox_players = QCheckBox("Track ผู้เล่น")
+        self.checkbox_players.setChecked(True)
+        self.checkbox_players.setStyleSheet(checkbox_style)
+        options_layout.addWidget(self.checkbox_players)
+        
+        self.checkbox_goalkeepers = QCheckBox("Track ผู้รักษาประตู")
+        self.checkbox_goalkeepers.setChecked(True)
+        self.checkbox_goalkeepers.setStyleSheet(checkbox_style)
+        options_layout.addWidget(self.checkbox_goalkeepers)
+        
+        self.checkbox_referees = QCheckBox("Track ผู้ตัดสิน")
+        self.checkbox_referees.setChecked(True)
+        self.checkbox_referees.setStyleSheet(checkbox_style)
+        options_layout.addWidget(self.checkbox_referees)
+        
+        self.checkbox_ball = QCheckBox("Track ลูกบอล")
+        self.checkbox_ball.setChecked(True)
+        self.checkbox_ball.setStyleSheet(checkbox_style)
+        options_layout.addWidget(self.checkbox_ball)
+        
+        self.checkbox_stats = QCheckBox("แสดงสถิติ")
+        self.checkbox_stats.setChecked(True)
+        self.checkbox_stats.setStyleSheet(checkbox_style)
+        options_layout.addWidget(self.checkbox_stats)
+        
+        # Add warning/info label
+        info_label = QLabel("💡 หมายเหตุ: ตัวเลือกข้างต้นใช้สำหรับการแสดงผลในวิดีโอเท่านั้น ไม่ส่งผลต่อการวิเคราะห์ผลด้าน ImageProcessing ของ AI")
+        info_label.setStyleSheet("""
+            QLabel {
+                font-size: 9.5pt;
+                color: #b8b8b8;
+                background-color: #2a2a2a;
+                border: 1px solid #444;
+                border-left: 3px solid #c41e3a;
+                border-radius: 4px;
+                padding: 8px 10px;
+                margin-top: 2px;
+            }
+        """)
+        info_label.setWordWrap(True)
+        info_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        info_label.setContentsMargins(0, 0, 0, 0)
+        options_layout.addWidget(info_label)
+        
+        options_group.setLayout(options_layout)
+        top_row.addWidget(options_group, 1)  # Stretch factor 1
+        
+        # Video Source section - right side
+        source_group = QGroupBox("แหล่งวิดีโอ")
+        source_group.setStyleSheet(options_group.styleSheet())
+        source_layout = QVBoxLayout()
+        source_layout.setContentsMargins(15, 10, 15, 10)
+        source_layout.setSpacing(14)
+        
+        # Demo section
+        demo_label = QLabel("ตัวอย่าง")
+        demo_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-top: 5px;")
+        source_layout.addWidget(demo_label)
+        
+        demo_instruction = QLabel("เลือกวิดีโอตัวอย่างจาก 2 วิดีโอ")
+        demo_instruction.setStyleSheet("color: #b0b0b0; font-size: 10pt; margin-bottom: 8px;")
+        source_layout.addWidget(demo_instruction)
+        
+        self.demo_button_group = QButtonGroup()
+        radio_style = """
+            QRadioButton {
+                font-size: 11pt;
+                color: #e0e0e0;
+                spacing: 8px;
+                padding: 4px;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border: 2px solid #666;
+                background-color: #2b2b2b;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+            QRadioButton::indicator:hover {
+                border-color: #c41e3a;
+            }
+        """
+        self.radio_demo1 = QRadioButton("ตัวอย่าง 1")
+        self.radio_demo1.setStyleSheet(radio_style)
+        self.radio_demo2 = QRadioButton("ตัวอย่าง 2")
+        self.radio_demo2.setStyleSheet(radio_style)
+        self.radio_demo1.setChecked(False)
+        self.radio_demo2.setChecked(False)
+        self.demo_button_group.addButton(self.radio_demo1, 0)
+        self.demo_button_group.addButton(self.radio_demo2, 1)
+        
+        demo_radio_layout = QHBoxLayout()
+        demo_radio_layout.setSpacing(20)
+        demo_radio_layout.addWidget(self.radio_demo1)
+        demo_radio_layout.addWidget(self.radio_demo2)
+        demo_radio_layout.addStretch()
+        source_layout.addLayout(demo_radio_layout)
+        
+        self.radio_demo1.toggled.connect(self.on_demo_selected)
+        self.radio_demo2.toggled.connect(self.on_demo_selected)
+        
+        # Separator
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
+        line2.setStyleSheet("color: #555; margin: 12px 0;")
+        source_layout.addWidget(line2)
+        
+        # Upload section
+        upload_label = QLabel("อัปโหลดวิดีโอ")
+        upload_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-top: 5px;")
+        source_layout.addWidget(upload_label)
+        
+        self.btn_browse = QPushButton("เลือกไฟล์วิดีโอ")
+        self.btn_browse.clicked.connect(self.browse_video)
+        self.btn_browse.setMinimumHeight(40)
+        self.btn_browse.setStyleSheet("""
+            QPushButton {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11pt;
+                border: 2px solid #555;
+            }
+            QPushButton:hover {
+                background-color: #333;
+                border-color: #c41e3a;
+                color: #c41e3a;
+            }
+            QPushButton:pressed {
+                background-color: #1e1e1e;
+            }
+        """)
+        source_layout.addWidget(self.btn_browse)
+        
+        self.selected_video_label = QLabel("")
+        self.selected_video_label.setWordWrap(True)
+        self.selected_video_label.setStyleSheet("color: #b0b0b0; font-size: 10pt; margin-top: 5px; padding: 5px;")
+        source_layout.addWidget(self.selected_video_label)
+        
+        source_group.setLayout(source_layout)
+        top_row.addWidget(source_group, 1)  # Stretch factor 1
+        
+        layout.addLayout(top_row)
+        
+        # Video preview widget - larger, in the middle
+        self.preview_video = PreviewVideoWidget()
+        self.preview_video.setMinimumHeight(420)
+        self.preview_video.setMaximumHeight(550)
+        layout.addWidget(self.preview_video, 1)  # Stretch factor 1 to take available space
+        
+        # Add spacing before start button
+        layout.addSpacing(10)
+        
+        # Start Analysis button - moved from sidebar
+        self.btn_start = QPushButton("เริ่มวิเคราะห์")
+        self.btn_start.clicked.connect(self.start_analysis)
+        self.btn_start.setEnabled(False)
+        self.btn_start.setMinimumHeight(55)
+        self.btn_start.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 16px 24px;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13pt;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+            QPushButton:disabled {
+                background-color: #555;
+                color: #888;
+            }
+        """)
+        layout.addWidget(self.btn_start)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMinimumHeight(25)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #555;
+                border-radius: 5px;
+                text-align: center;
+                font-size: 10pt;
+                color: #e0e0e0;
+                background-color: #2b2b2b;
+            }
+            QProgressBar::chunk {
+                background-color: #c41e3a;
+                border-radius: 3px;
+            }
+        """)
+        layout.addWidget(self.progress_bar)
+        
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #c41e3a; font-weight: bold; font-size: 11pt; padding: 8px;")
+        layout.addWidget(self.status_label)
+        
+        layout.addStretch()
+        
+        return widget
+    
+    def create_results_tab(self):
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        title = QLabel("Video Preview")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #e0e0e0; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Video player widget
+        self.result_video_player = VideoPlayerWidget()
+        self.result_video_player.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.result_video_player, 1)
+        
+        # Buttons for video control
+        button_layout = QHBoxLayout()
+        
+        self.btn_open_output = QPushButton("เปิดวีดีโอ")
+        self.btn_open_output.clicked.connect(self.open_video_file)
+        button_layout.addWidget(self.btn_open_output)
+        
+        self.btn_open_folder = QPushButton("เปิดโฟลเดอร์ผลลัพธ์")
+        self.btn_open_folder.clicked.connect(self.open_output_folder)
+        button_layout.addWidget(self.btn_open_folder)
+        
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        return widget
+    
+    def create_ai_results_tab(self):
+        """Create AI Results tab with sub-tabs for different analysis types"""
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        
+        # Create sub-tabs widget
+        sub_tabs = QTabWidget()
+        sub_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                border-radius: 4px;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #2b2b2b;
+                color: #b0b0b0;
+                padding: 10px 20px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #c41e3a;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #333;
+            }
+        """)
+        
+        # Heat Map tab (existing functionality)
+        heat_map_tab = self.create_heat_map_subtab()
+        sub_tabs.addTab(heat_map_tab, "Heat Map")
+        
+        # Statistics tab (new - coming soon)
+        statistics_tab = self.create_statistics_subtab()
+        sub_tabs.addTab(statistics_tab, "Statistics")
+        
+        # Movement Analysis tab (new - coming soon)
+        movement_tab = self.create_movement_analysis_subtab()
+        sub_tabs.addTab(movement_tab, "Movement Analysis")
+        
+        # Pass Analysis tab (new - coming soon)
+        pass_analysis_tab = self.create_pass_analysis_subtab()
+        sub_tabs.addTab(pass_analysis_tab, "Pass Analysis")
+        
+        # Zone Analysis tab (new - coming soon)
+        zone_analysis_tab = self.create_zone_analysis_subtab()
+        sub_tabs.addTab(zone_analysis_tab, "Zone Analysis")
+        
+        layout.addWidget(sub_tabs)
+        
+        return widget
+    
+    def create_heat_map_subtab(self):
+        """Create Heat Map sub-tab"""
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Info label
+        info_label = QLabel("Heat Maps จะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+        
+        # Heat map type selector
+        heat_map_group = QGroupBox("เลือกประเภท Heat Map")
+        heat_map_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        heat_map_layout = QHBoxLayout()
+        
+        self.heat_map_radio_group = QButtonGroup()
+        self.radio_all_players = QRadioButton("ผู้เล่นทั้งหมด")
+        self.radio_team1 = QRadioButton("ทีม 1")
+        self.radio_team2 = QRadioButton("ทีม 2")
+        self.radio_ball = QRadioButton("ลูกบอล")
+        
+        self.heat_map_radio_group.addButton(self.radio_all_players, 0)
+        self.heat_map_radio_group.addButton(self.radio_team1, 1)
+        self.heat_map_radio_group.addButton(self.radio_team2, 2)
+        self.heat_map_radio_group.addButton(self.radio_ball, 3)
+        
+        radio_style = """
+            QRadioButton {
+                font-size: 11pt;
+                color: #e0e0e0;
+                spacing: 8px;
+                padding: 4px;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border: 2px solid #666;
+                background-color: #2b2b2b;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+        """
+        self.radio_all_players.setStyleSheet(radio_style)
+        self.radio_team1.setStyleSheet(radio_style)
+        self.radio_team2.setStyleSheet(radio_style)
+        self.radio_ball.setStyleSheet(radio_style)
+        self.radio_all_players.setChecked(True)
+        
+        heat_map_layout.addWidget(self.radio_all_players)
+        heat_map_layout.addWidget(self.radio_team1)
+        heat_map_layout.addWidget(self.radio_team2)
+        heat_map_layout.addWidget(self.radio_ball)
+        heat_map_layout.addStretch()
+        
+        # Connect radio buttons to update heat map
+        self.radio_all_players.toggled.connect(lambda: self.update_heat_map_display())
+        self.radio_team1.toggled.connect(lambda: self.update_heat_map_display())
+        self.radio_team2.toggled.connect(lambda: self.update_heat_map_display())
+        self.radio_ball.toggled.connect(lambda: self.update_heat_map_display())
+        
+        heat_map_group.setLayout(heat_map_layout)
+        layout.addWidget(heat_map_group)
+        
+        # Heat map display area
+        heat_map_display = QFrame()
+        heat_map_display.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a1a;
+                border: 2px solid #555;
+                border-radius: 6px;
+            }
+        """)
+        heat_map_display_layout = QVBoxLayout(heat_map_display)
+        heat_map_display_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Label for heat map image
+        self.heat_map_label = QLabel()
+        self.heat_map_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.heat_map_label.setMinimumHeight(400)
+        self.heat_map_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 1px solid #555;
+                border-radius: 4px;
+            }
+        """)
+        self.heat_map_label.setText("ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        self.heat_map_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 1px solid #555;
+                border-radius: 4px;
+                color: #888;
+                font-size: 12pt;
+            }
+        """)
+        heat_map_display_layout.addWidget(self.heat_map_label)
+        
+        layout.addWidget(heat_map_display, 1)
+        
+        # Save button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.btn_save_heat_map = QPushButton("บันทึก Heat Map เป็น PNG")
+        self.btn_save_heat_map.clicked.connect(self.save_heat_map)
+        self.btn_save_heat_map.setEnabled(False)  # Disabled until heat map is generated
+        self.btn_save_heat_map.setMinimumHeight(40)
+        self.btn_save_heat_map.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11pt;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+            QPushButton:disabled {
+                background-color: #555;
+                color: #888;
+            }
+        """)
+        button_layout.addWidget(self.btn_save_heat_map)
+        
+        layout.addLayout(button_layout)
+        
+        return widget
+    
+    def create_statistics_subtab(self):
+        """Create Statistics sub-tab with real statistics"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Title
+        title = QLabel("Statistics")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #e0e0e0; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Info label
+        info_label = QLabel("สถิติจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+        
+        # Scroll area for statistics
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c41e3a;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #d63347;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+        
+        # Team statistics section
+        self.team_stats_group = QGroupBox("Team Statistics")
+        self.team_stats_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        team_stats_layout = QVBoxLayout()
+        self.team_stats_layout = team_stats_layout
+        self.team_stats_group.setLayout(team_stats_layout)
+        scroll_layout.addWidget(self.team_stats_group)
+        
+        # Placeholder when no data
+        self.stats_placeholder = QLabel("ยังไม่มีข้อมูลสถิติ\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        self.stats_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stats_placeholder.setStyleSheet("""
+            QLabel {
+                color: #888;
+                font-size: 14pt;
+                padding: 40px;
+            }
+        """)
+        scroll_layout.addWidget(self.stats_placeholder)
+        
+        # Initially hide team stats group and show placeholder
+        self.team_stats_group.setVisible(False)
+        self.stats_placeholder.setVisible(True)
+        
+        scroll_layout.addStretch()
+        
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+        
+        return widget
+    
+    def update_statistics(self):
+        """Update statistics display when tracking data is available"""
+        print(f"[DEBUG] update_statistics called. Has tracks: {self.tracks is not None}")
+        
+        if not self.tracks:
+            # Show placeholder if no tracks
+            print("[DEBUG] No tracks available")
+            if hasattr(self, 'stats_placeholder'):
+                self.stats_placeholder.setVisible(True)
+            if hasattr(self, 'team_stats_group'):
+                self.team_stats_group.setVisible(False)
+            return
+        
+        # Check if tracks have data
+        players_data = self.tracks.get("players", [])
+        print(f"[DEBUG] Players data length: {len(players_data)}")
+        
+        if not players_data or len(players_data) == 0:
+            print("[DEBUG] No players data")
+            if hasattr(self, 'stats_placeholder'):
+                self.stats_placeholder.setText("ยังไม่มีข้อมูลผู้เล่น\nกรุณากดวิเคราะห์วิดีโอก่อน")
+                self.stats_placeholder.setVisible(True)
+            if hasattr(self, 'team_stats_group'):
+                self.team_stats_group.setVisible(False)
+            return
+        
+        try:
+            from analytics.statistics_calculator import StatisticsCalculator
+            
+            # Get field dimensions
+            field_width = 1920
+            field_height = 1080
+            if self.video_frames and len(self.video_frames) > 0:
+                field_height, field_width = self.video_frames[0].shape[:2]
+            
+            # Get FPS (default to 30 if not available)
+            fps = 30  # You might want to store this from video processing
+            
+            print(f"[DEBUG] Calculating statistics with {len(players_data)} frames")
+            
+            # Calculate statistics
+            calculator = StatisticsCalculator(fps=fps)
+            stats = calculator.calculate_player_statistics(self.tracks, field_width, field_height)
+            print(f"[DEBUG] Statistics calculated: {stats}")
+            
+            summary = calculator.get_summary_statistics(stats)
+            print(f"[DEBUG] Summary: {summary}")
+            
+            # Clear previous statistics
+            self.clear_statistics_display()
+            
+            # Display team statistics (includes overall stats)
+            summary["overall"] = stats["overall"]
+            self.display_team_statistics(summary)
+            
+            # Hide placeholder and show team stats
+            if hasattr(self, 'stats_placeholder'):
+                self.stats_placeholder.setVisible(False)
+            if hasattr(self, 'team_stats_group'):
+                self.team_stats_group.setVisible(True)
+            
+            print("[DEBUG] Statistics displayed successfully")
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"เกิดข้อผิดพลาด: {str(e)}"
+            print(f"[ERROR] Error updating statistics: {error_msg}")
+            print(traceback.format_exc())
+            # Show error message with more details
+            if hasattr(self, 'stats_placeholder'):
+                detailed_error = f"{error_msg}\n\nกรุณาตรวจสอบ console สำหรับรายละเอียด"
+                self.stats_placeholder.setText(detailed_error)
+                self.stats_placeholder.setVisible(True)
+            if hasattr(self, 'team_stats_group'):
+                self.team_stats_group.setVisible(False)
+    
+    def clear_statistics_display(self):
+        """Clear all statistics widgets"""
+        # Clear team statistics
+        while self.team_stats_layout.count():
+            child = self.team_stats_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+    
+    def get_most_common_team_colour(self, team_id: int) -> Optional[tuple]:
+        """
+        Find the most common team colour for a team by counting players
+        Goalkeepers usually have different colours, so the most common colour = regular players
+        """
+        if not self.tracks:
+            return None
+        
+        from collections import Counter
+        
+        # Count team colours for this team across all frames
+        team_colours = []
+        
+        for frame_num, frame_players in enumerate(self.tracks.get("players", [])):
+            if not isinstance(frame_players, dict):
+                continue
+            
+            for pid, player in frame_players.items():
+                if not isinstance(player, dict):
+                    continue
+                
+                if player.get("team") == team_id and "team_colour" in player:
+                    team_colour = player.get("team_colour")
+                    # Convert to tuple for hashing (if it's numpy array or list)
+                    if isinstance(team_colour, np.ndarray):
+                        team_colour = tuple(team_colour.tolist())
+                    elif isinstance(team_colour, list):
+                        team_colour = tuple(team_colour)
+                    elif isinstance(team_colour, tuple):
+                        pass
+                    else:
+                        continue
+                    
+                    # Round to nearest 10 to group similar colours together
+                    # This helps account for slight variations in lighting
+                    rounded_colour = tuple(int(round(c / 10.0) * 10) for c in team_colour)
+                    team_colours.append(rounded_colour)
+        
+        if not team_colours:
+            return None
+        
+        # Find most common colour
+        colour_counter = Counter(team_colours)
+        most_common_colour, count = colour_counter.most_common(1)[0]
+        
+        print(f"[DEBUG] Team {team_id} most common colour: {most_common_colour} (appears {count} times out of {len(team_colours)} total)")
+        
+        return most_common_colour
+    
+    def colours_similar(self, colour1: tuple, colour2: tuple, tolerance: int = 30) -> bool:
+        """
+        Check if two colours are similar within tolerance
+        """
+        if len(colour1) != 3 or len(colour2) != 3:
+            return False
+        
+        # Calculate total difference
+        diff = sum(abs(a - b) for a, b in zip(colour1, colour2))
+        return diff <= tolerance
+    
+    def is_likely_goalkeeper(self, player: Dict, frame_width: int, frame_height: int) -> bool:
+        """
+        Check if a player is likely a goalkeeper based on position
+        Goalkeepers are usually near the edges of the field (near goals)
+        """
+        if "bbox" not in player:
+            return False
+        
+        bbox = player["bbox"]
+        x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+        
+        # Calculate center position
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        
+        # Goalkeepers are usually near the left or right edges (within 15% of field width)
+        edge_threshold = frame_width * 0.15
+        
+        # Check if player is near left or right edge
+        is_near_left_edge = center_x < edge_threshold
+        is_near_right_edge = center_x > (frame_width - edge_threshold)
+        
+        # Also check if player is in lower part of field (goalkeepers are usually in goal area)
+        is_in_lower_field = center_y > frame_height * 0.6
+        
+        # Likely goalkeeper if near edge AND in lower part of field
+        return (is_near_left_edge or is_near_right_edge) and is_in_lower_field
+    
+    def analyze_player_positions(self, player_id: int, team_id: int, frame_width: int, frame_height: int) -> Dict:
+        """
+        Analyze a player's positions across all frames to determine if they're likely a goalkeeper
+        Returns a dictionary with analysis results
+        """
+        if not self.tracks:
+            return {"is_goalkeeper": False, "edge_ratio": 0.0, "center_ratio": 0.0}
+        
+        edge_threshold = frame_width * 0.15
+        center_threshold_x = frame_width * 0.3  # Middle 60% of field width
+        center_threshold_y = frame_height * 0.3  # Middle 40% of field height
+        
+        edge_frames = 0
+        center_frames = 0
+        total_frames = 0
+        
+        for frame_num, frame_players in enumerate(self.tracks.get("players", [])):
+            if not isinstance(frame_players, dict):
+                continue
+            
+            if player_id not in frame_players:
+                continue
+            
+            player = frame_players[player_id]
+            if not isinstance(player, dict) or player.get("team") != team_id:
+                continue
+            
+            if "bbox" not in player:
+                continue
+            
+            bbox = player["bbox"]
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            total_frames += 1
+            
+            # Check if near edge
+            is_near_left = center_x < edge_threshold
+            is_near_right = center_x > (frame_width - edge_threshold)
+            is_near_edge = is_near_left or is_near_right
+            
+            if is_near_edge:
+                edge_frames += 1
+            
+            # Check if in center area
+            is_in_center_x = center_x >= center_threshold_x and center_x <= (frame_width - center_threshold_x)
+            is_in_center_y = center_y >= center_threshold_y and center_y <= (frame_height - center_threshold_y)
+            is_in_center = is_in_center_x and is_in_center_y
+            
+            if is_in_center:
+                center_frames += 1
+        
+        if total_frames == 0:
+            return {"is_goalkeeper": False, "edge_ratio": 0.0, "center_ratio": 0.0}
+        
+        edge_ratio = edge_frames / total_frames
+        center_ratio = center_frames / total_frames
+        
+        # Goalkeeper if: spends >60% of time near edges AND spends <20% of time in center
+        is_goalkeeper = edge_ratio > 0.6 and center_ratio < 0.2
+        
+        return {
+            "is_goalkeeper": is_goalkeeper,
+            "edge_ratio": edge_ratio,
+            "center_ratio": center_ratio,
+            "total_frames": total_frames
+        }
+    
+    def get_player_image(self, team_id: int, max_size: int = 180) -> Optional[QPixmap]:
+        """Extract player image from first frame for the team (using most common team colour, avoiding goalkeepers and referees)"""
+        if not self.tracks or not self.video_frames:
+            return None
+        
+        try:
+            # Import referee filter for additional checks
+            from referee_filter import RefereeFilter
+            referee_filter = RefereeFilter(iou_threshold=0.3, color_tolerance=40)
+            
+            # Get frame dimensions for goalkeeper detection
+            frame_height, frame_width = self.video_frames[0].shape[:2] if self.video_frames else (1080, 1920)
+            
+            # Get the most common team colour (should be regular players, not goalkeeper)
+            most_common_colour = self.get_most_common_team_colour(team_id)
+            
+            # Collect all players with their analysis
+            player_candidates = {}  # key: (player_id, frame_num), value: (player, analysis, color_match_score)
+            
+            # First pass: Collect all players and analyze them
+            for frame_num, frame_players in enumerate(self.tracks.get("players", [])):
+                if not isinstance(frame_players, dict):
+                    continue
+                
+                for pid, player in frame_players.items():
+                    if not isinstance(player, dict):
+                        continue
+                    
+                    if player.get("team") != team_id or "bbox" not in player:
+                        continue
+                    
+                    # Check if player might be a referee by color analysis
+                    is_referee = False
+                    player_colour = player.get("team_colour")
+                    
+                    # Convert to tuple for comparison
+                    if player_colour is not None:
+                        if isinstance(player_colour, np.ndarray):
+                            player_colour = tuple(player_colour.tolist())
+                        elif isinstance(player_colour, list):
+                            player_colour = tuple(player_colour)
+                        
+                        if isinstance(player_colour, tuple) and len(player_colour) == 3:
+                            # Check if color matches referee colors
+                            if referee_filter.is_referee_color(player_colour):
+                                is_referee = True  # Skip referee-like colors
+                    
+                    # Check for overlap with detected referees
+                    if not is_referee and frame_num < len(self.tracks.get("referees", [])):
+                        frame_referees = self.tracks["referees"][frame_num]
+                        if isinstance(frame_referees, dict):
+                            player_bbox = player["bbox"]
+                            for referee_id, referee in frame_referees.items():
+                                if "bbox" in referee:
+                                    iou = referee_filter.calculate_iou(player_bbox, referee["bbox"])
+                                    if iou > 0.3:  # Significant overlap
+                                        is_referee = True  # Skip this player (likely a referee)
+                                        break
+                    
+                    # Skip if identified as referee
+                    if is_referee:
+                        continue
+                    
+                    # Check if player_colour is valid
+                    if player_colour is None or not isinstance(player_colour, tuple) or len(player_colour) != 3:
+                        continue
+                    
+                    # Analyze player position across all frames
+                    analysis = self.analyze_player_positions(pid, team_id, frame_width, frame_height)
+                    
+                    # Skip if clearly a goalkeeper
+                    if analysis["is_goalkeeper"]:
+                        continue
+                    
+                    # Calculate color match score
+                    color_match_score = 0
+                    if most_common_colour is not None:
+                        rounded_colour = tuple(int(round(c / 10.0) * 10) for c in player_colour)
+                        if rounded_colour == most_common_colour:
+                            color_match_score = 2  # Perfect match
+                        elif self.colours_similar(player_colour, most_common_colour, tolerance=50):
+                            color_match_score = 1  # Similar color
+                    else:
+                        color_match_score = 1  # No common color, accept any
+                    
+                    if color_match_score > 0:
+                        key = (pid, frame_num)
+                        if key not in player_candidates:
+                            player_candidates[key] = (player, analysis, color_match_score)
+            
+            # Sort candidates by: 1) color match score (higher better), 2) center ratio (higher better = more in center)
+            # 3) lower edge ratio (lower better = less time near edges)
+            sorted_candidates = sorted(
+                player_candidates.items(),
+                key=lambda x: (
+                    -x[1][2],  # color_match_score (negative for descending)
+                    -x[1][1]["center_ratio"],  # center_ratio (negative for descending)
+                    x[1][1]["edge_ratio"]  # edge_ratio (ascending)
+                )
+            )
+            
+            # Use the best candidate
+            if sorted_candidates:
+                (pid, frame_num), (player, analysis, color_score) = sorted_candidates[0]
+                print(f"[DEBUG] Team {team_id}: Selected player {pid} from frame {frame_num}")
+                print(f"[DEBUG]   - Color match score: {color_score}")
+                print(f"[DEBUG]   - Edge ratio: {analysis['edge_ratio']:.2f}, Center ratio: {analysis['center_ratio']:.2f}")
+                print(f"[DEBUG]   - Total candidates: {len(sorted_candidates)}")
+                return self._extract_player_image(frame_num, player, max_size)
+            
+            # Fallback: Try with less strict filtering (allow goalkeepers if no other option)
+            print(f"[DEBUG] No non-goalkeeper candidates found for team {team_id}, trying with all players")
+            for frame_num, frame_players in enumerate(self.tracks.get("players", [])):
+                if not isinstance(frame_players, dict):
+                    continue
+                
+                for pid, player in frame_players.items():
+                    if not isinstance(player, dict):
+                        continue
+                    
+                    if player.get("team") == team_id and "bbox" in player:
+                        # Still prefer players with matching color
+                        player_colour = player.get("team_colour")
+                        if player_colour is not None:
+                            if isinstance(player_colour, np.ndarray):
+                                player_colour = tuple(player_colour.tolist())
+                            elif isinstance(player_colour, list):
+                                player_colour = tuple(player_colour)
+                            
+                            if isinstance(player_colour, tuple) and len(player_colour) == 3:
+                                if most_common_colour is None or self.colours_similar(player_colour, most_common_colour, tolerance=80):
+                                    return self._extract_player_image(frame_num, player, max_size)
+            
+            # Final fallback: any player
+            for frame_num, frame_players in enumerate(self.tracks.get("players", [])):
+                if not isinstance(frame_players, dict):
+                    continue
+                
+                for pid, player in frame_players.items():
+                    if not isinstance(player, dict):
+                        continue
+                    
+                    if player.get("team") == team_id and "bbox" in player:
+                        return self._extract_player_image(frame_num, player, max_size)
+            
+        except Exception as e:
+            print(f"Error extracting player image: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+        
+        return None
+    
+    def _extract_player_image(self, frame_num: int, player: Dict, max_size: int = 180) -> Optional[QPixmap]:
+        """Extract and process player image from frame"""
+        try:
+            if frame_num >= len(self.video_frames):
+                return None
+            
+            frame = self.video_frames[frame_num]
+            
+            # Extract player image from bbox with padding (zoom out)
+            bbox = player["bbox"]
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            
+            # Calculate padding to zoom out (add 30% on each side)
+            bbox_width = x2 - x1
+            bbox_height = y2 - y1
+            padding_x = int(bbox_width * 0.3)  # 30% padding on left and right
+            padding_y = int(bbox_height * 0.4)  # 40% padding on top and bottom (more for head)
+            
+            # Apply padding
+            x1 = x1 - padding_x
+            y1 = y1 - padding_y
+            x2 = x2 + padding_x
+            y2 = y2 + padding_y
+            
+            # Ensure coordinates are within frame bounds
+            h, w = frame.shape[:2]
+            x1 = max(0, min(x1, w))
+            y1 = max(0, min(y1, h))
+            x2 = max(0, min(x2, w))
+            y2 = max(0, min(y2, h))
+            
+            if x2 > x1 and y2 > y1:
+                player_image = frame[y1:y2, x1:x2].copy()  # Make a copy to ensure contiguous array
+                
+                # Resize to larger size for display
+                h_img, w_img = player_image.shape[:2]
+                if h_img > max_size or w_img > max_size:
+                    scale = max_size / max(h_img, w_img)
+                    new_w = int(w_img * scale)
+                    new_h = int(h_img * scale)
+                    import cv2
+                    player_image = cv2.resize(player_image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                
+                # Convert to QPixmap
+                # Ensure array is contiguous and convert to bytes
+                import cv2
+                height, width, channel = player_image.shape
+                bytes_per_line = 3 * width
+                
+                # Convert numpy array to bytes
+                if not player_image.flags['C_CONTIGUOUS']:
+                    player_image = np.ascontiguousarray(player_image)
+                
+                # Convert to bytes
+                image_bytes = player_image.tobytes()
+                
+                q_image = QImage(image_bytes, width, height, bytes_per_line, QImage.Format.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_image)
+                return pixmap
+                
+        except Exception as e:
+            print(f"Error in _extract_player_image: {str(e)}")
+        
+        return None
+    
+    def display_team_statistics(self, summary: Dict):
+        """Display team statistics (only accurate values)"""
+        # summary structure: {"teams": {1: {...}, 2: {...}}, "overall": {...}}
+        team_stats = summary.get("teams", {})
+        
+        for team_id in [1, 2]:
+            if team_id not in team_stats:
+                continue
+            team_data = team_stats[team_id]
+            
+            team_frame = QFrame()
+            team_frame.setStyleSheet("""
+                QFrame {
+                    background-color: #2b2b2b;
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin: 5px;
+                }
+            """)
+            team_layout = QHBoxLayout(team_frame)  # Changed to HBoxLayout for side-by-side layout
+            
+            # Left side: Player image
+            image_container = QFrame()
+            image_container.setFixedWidth(200)  # Increased from 140 to 200
+            image_container.setFixedHeight(250)  # Set fixed height for better layout
+            image_container.setStyleSheet("""
+                QFrame {
+                    background-color: #1a1a1a;
+                    border: 2px solid #555;
+                    border-radius: 6px;
+                }
+            """)
+            image_layout = QVBoxLayout(image_container)
+            image_layout.setContentsMargins(5, 5, 5, 5)
+            image_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # Get player image
+            player_pixmap = self.get_player_image(team_id, max_size=180)  # Increased max size
+            if player_pixmap:
+                player_label = QLabel()
+                # Scale pixmap to fit container while maintaining aspect ratio
+                scaled_pixmap = player_pixmap.scaled(
+                    190, 240,  # Container size minus padding
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                player_label.setPixmap(scaled_pixmap)
+                player_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                player_label.setStyleSheet("""
+                    QLabel {
+                        border: none;
+                        background-color: transparent;
+                    }
+                """)
+                image_layout.addWidget(player_label)
+            else:
+                # Placeholder if no image
+                placeholder_label = QLabel("No Image")
+                placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                placeholder_label.setStyleSheet("""
+                    QLabel {
+                        color: #888;
+                        font-size: 10pt;
+                        background-color: transparent;
+                    }
+                """)
+                image_layout.addWidget(placeholder_label)
+            
+            team_layout.addWidget(image_container)
+            
+            # Right side: Statistics
+            stats_container = QWidget()
+            stats_layout = QVBoxLayout(stats_container)
+            
+            # Team title
+            team_title = QLabel(f"Team {team_id}")
+            team_title.setStyleSheet("""
+                QLabel {
+                    color: #c41e3a;
+                    font-size: 16pt;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+            """)
+            stats_layout.addWidget(team_title)
+            
+            # Ball Possession (main stat)
+            possession_label = QLabel(f"Ball Possession: {team_data['ball_possession_percent']:.1f}%")
+            possession_label.setStyleSheet("""
+                QLabel {
+                    color: #4CAF50;
+                    font-size: 18pt;
+                    font-weight: bold;
+                    padding: 10px;
+                    background-color: #1a1a1a;
+                    border-radius: 4px;
+                    margin-bottom: 5px;
+                }
+            """)
+            team_layout.addWidget(possession_label)
+            
+            # Other statistics
+            stats_text = (
+                f"Possession Time: {team_data['ball_possession_time_minutes']:.1f} minutes\n"
+                f"Possession Frames: {team_data['ball_possession_frames']} frames\n"
+                f"Total Touches: {team_data['total_touches']}\n"
+                f"Players Detected: {team_data['total_players']}\n"
+                f"Active Frames: {team_data['active_frames']}"
+            )
+            
+            stats_label = QLabel(stats_text)
+            stats_label.setStyleSheet("""
+                QLabel {
+                    color: #e0e0e0;
+                    font-size: 11pt;
+                    padding: 5px;
+                }
+            """)
+            stats_layout.addWidget(stats_label)
+            
+            stats_layout.addStretch()
+            team_layout.addWidget(stats_container, 1)  # Stretch factor 1
+            
+            self.team_stats_layout.addWidget(team_frame)
+        
+        # Overall statistics
+        overall_data = team_stats.get("overall", {})
+        if overall_data:
+            overall_frame = QFrame()
+            overall_frame.setStyleSheet("""
+                QFrame {
+                    background-color: #1a1a1a;
+                    border: 2px solid #555;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin: 10px 5px;
+                }
+            """)
+            overall_layout = QVBoxLayout(overall_frame)
+            
+            overall_title = QLabel("Overall Statistics")
+            overall_title.setStyleSheet("""
+                QLabel {
+                    color: #c41e3a;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+            """)
+            overall_layout.addWidget(overall_title)
+            
+            overall_text = (
+                f"Total Frames: {overall_data.get('total_frames', 0)}\n"
+                f"Video Duration: {overall_data.get('video_duration_minutes', 0):.1f} minutes\n"
+                f"Team 1 Players: {overall_data.get('total_players_team1', 0)}\n"
+                f"Team 2 Players: {overall_data.get('total_players_team2', 0)}\n"
+                f"Total Possession Frames: {overall_data.get('total_ball_possession_frames', 0)}"
+            )
+            
+            overall_label = QLabel(overall_text)
+            overall_label.setStyleSheet("""
+                QLabel {
+                    color: #b0b0b0;
+                    font-size: 11pt;
+                    padding: 5px;
+                }
+            """)
+            overall_layout.addWidget(overall_label)
+            
+            self.team_stats_layout.addWidget(overall_frame)
+    
+    def display_top_players(self, top_players: Dict):
+        """Display top players statistics - removed as we only show team stats now"""
+        # Top players section removed - only showing team statistics
+        pass
+    
+    def create_movement_analysis_subtab(self):
+        """Create Movement Analysis sub-tab with movement analysis features"""
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Info label
+        info_label = QLabel("วิเคราะห์การเคลื่อนไหวจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+        
+        # Warning/Info box about accuracy
+        warning_frame = QFrame()
+        warning_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2a2a1a;
+                border: 1px solid #666;
+                border-radius: 4px;
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+        """)
+        warning_layout = QVBoxLayout(warning_frame)
+        warning_label = QLabel(
+            "⚠️ หมายเหตุเกี่ยวกับความแม่นยำ:\n"
+            "• หน่วย px/s = pixels per second (พิกเซลต่อวินาที)\n"
+            "• ไม่สามารถแปลงเป็น m/s ได้โดยไม่มี field calibration\n"
+            "• ข้อมูลนี้มาจาก AI tracking ซึ่งมีความแม่นยำประมาณ 90-95%\n"
+            "• ความเร็วและระยะทางเป็นค่าสัมพัทธ์สำหรับเปรียบเทียบ\n"
+            "• ใช้สำหรับวิเคราะห์รูปแบบการเล่นและการเปรียบเทียบระหว่างผู้เล่น"
+        )
+        warning_label.setStyleSheet("color: #ffcc00; font-size: 9pt;")
+        warning_label.setWordWrap(True)
+        warning_layout.addWidget(warning_label)
+        layout.addWidget(warning_frame)
+        
+        # Controls section
+        controls_layout = QHBoxLayout()
+        
+        # Analysis type selector
+        analysis_group = QGroupBox("ประเภทการวิเคราะห์")
+        analysis_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        analysis_layout = QVBoxLayout()
+        
+        self.movement_analysis_radio_group = QButtonGroup()
+        self.radio_movement_paths = QRadioButton("เส้นทางการเคลื่อนที่")
+        self.radio_speed_zones = QRadioButton("Speed Zones (พื้นที่ความเร็วสูง)")
+        self.radio_speed_chart = QRadioButton("กราฟความเร็ว")
+        self.radio_movement_stats = QRadioButton("สถิติการเคลื่อนไหว")
+        
+        self.movement_analysis_radio_group.addButton(self.radio_movement_paths, 0)
+        self.movement_analysis_radio_group.addButton(self.radio_speed_zones, 1)
+        self.movement_analysis_radio_group.addButton(self.radio_speed_chart, 2)
+        self.movement_analysis_radio_group.addButton(self.radio_movement_stats, 3)
+        
+        radio_style = """
+            QRadioButton {
+                font-size: 10pt;
+                color: #e0e0e0;
+                spacing: 8px;
+                padding: 4px;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid #666;
+                background-color: #2b2b2b;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+        """
+        self.radio_movement_paths.setStyleSheet(radio_style)
+        self.radio_speed_zones.setStyleSheet(radio_style)
+        self.radio_speed_chart.setStyleSheet(radio_style)
+        self.radio_movement_stats.setStyleSheet(radio_style)
+        self.radio_movement_paths.setChecked(True)
+        
+        analysis_layout.addWidget(self.radio_movement_paths)
+        analysis_layout.addWidget(self.radio_speed_zones)
+        analysis_layout.addWidget(self.radio_speed_chart)
+        analysis_layout.addWidget(self.radio_movement_stats)
+        analysis_group.setLayout(analysis_layout)
+        
+        # Team/Player selector
+        selector_group = QGroupBox("เลือกทีม/ผู้เล่น")
+        selector_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        selector_layout = QVBoxLayout()
+        
+        self.movement_team_radio_group = QButtonGroup()
+        self.radio_movement_all = QRadioButton("ผู้เล่นทั้งหมด")
+        self.radio_movement_team1 = QRadioButton("ทีม 1")
+        self.radio_movement_team2 = QRadioButton("ทีม 2")
+        self.radio_movement_all.setChecked(True)
+        
+        self.movement_team_radio_group.addButton(self.radio_movement_all, 0)
+        self.movement_team_radio_group.addButton(self.radio_movement_team1, 1)
+        self.movement_team_radio_group.addButton(self.radio_movement_team2, 2)
+        
+        self.radio_movement_all.setStyleSheet(radio_style)
+        self.radio_movement_team1.setStyleSheet(radio_style)
+        self.radio_movement_team2.setStyleSheet(radio_style)
+        
+        selector_layout.addWidget(self.radio_movement_all)
+        selector_layout.addWidget(self.radio_movement_team1)
+        selector_layout.addWidget(self.radio_movement_team2)
+        
+        # Speed threshold for speed zones
+        speed_threshold_layout = QHBoxLayout()
+        speed_threshold_label = QLabel("Speed Threshold:")
+        speed_threshold_label.setStyleSheet("color: #e0e0e0; font-size: 10pt;")
+        self.speed_threshold_spin = QSpinBox()
+        self.speed_threshold_spin.setMinimum(0)
+        self.speed_threshold_spin.setMaximum(10000)
+        self.speed_threshold_spin.setValue(100)
+        self.speed_threshold_spin.setSuffix(" px/s")
+        self.speed_threshold_spin.setStyleSheet("""
+            QSpinBox {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+                font-size: 10pt;
+            }
+        """)
+        speed_threshold_layout.addWidget(speed_threshold_label)
+        speed_threshold_layout.addWidget(self.speed_threshold_spin)
+        speed_threshold_layout.addStretch()
+        selector_layout.addLayout(speed_threshold_layout)
+        
+        selector_group.setLayout(selector_layout)
+        
+        controls_layout.addWidget(analysis_group)
+        controls_layout.addWidget(selector_group)
+        layout.addLayout(controls_layout)
+        
+        # Connect signals
+        self.radio_movement_paths.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_speed_zones.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_speed_chart.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_movement_stats.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_movement_all.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_movement_team1.toggled.connect(lambda: self.update_movement_analysis())
+        self.radio_movement_team2.toggled.connect(lambda: self.update_movement_analysis())
+        self.speed_threshold_spin.valueChanged.connect(lambda: self.update_movement_analysis())
+        
+        # Display area
+        display_frame = QFrame()
+        display_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a1a;
+                border: 2px solid #555;
+                border-radius: 6px;
+            }
+        """)
+        display_layout = QVBoxLayout(display_frame)
+        display_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Image/chart label
+        self.movement_analysis_label = QLabel()
+        self.movement_analysis_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.movement_analysis_label.setMinimumHeight(400)
+        self.movement_analysis_label.setText("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        self.movement_analysis_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 1px solid #555;
+                border-radius: 4px;
+                color: #888;
+                font-size: 12pt;
+            }
+        """)
+        display_layout.addWidget(self.movement_analysis_label)
+        
+        # Statistics text area (for movement stats)
+        self.movement_stats_text = QTextEdit()
+        self.movement_stats_text.setReadOnly(True)
+        self.movement_stats_text.setVisible(False)
+        self.movement_stats_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                font-size: 10pt;
+                font-family: 'Courier New', monospace;
+            }
+        """)
+        display_layout.addWidget(self.movement_stats_text)
+        
+        layout.addWidget(display_frame, 1)
+        
+        # Save button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.btn_save_movement = QPushButton("บันทึกภาพวิเคราะห์")
+        self.btn_save_movement.clicked.connect(self.save_movement_analysis)
+        self.btn_save_movement.setEnabled(False)
+        self.btn_save_movement.setMinimumHeight(40)
+        self.btn_save_movement.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11pt;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+            QPushButton:disabled {
+                background-color: #555;
+                color: #888;
+            }
+        """)
+        button_layout.addWidget(self.btn_save_movement)
+        layout.addLayout(button_layout)
+        
+        return widget
+    
+    def create_pass_analysis_subtab(self):
+        """Create Pass Analysis sub-tab (Coming Soon)"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Coming soon message
+        coming_soon_label = QLabel("Pass Analysis\nComing Soon")
+        coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        coming_soon_label.setStyleSheet("""
+            QLabel {
+                color: #888;
+                font-size: 24pt;
+                font-weight: bold;
+                padding: 40px;
+            }
+        """)
+        layout.addWidget(coming_soon_label)
+        
+        # Description
+        desc_label = QLabel(
+            "This tab will show:\n"
+            "• Pass success rate\n"
+            "• Pass distance analysis\n"
+            "• Pass direction heat map\n"
+            "• Key passes identification\n"
+            "• Pass chains\n"
+            "• And more..."
+        )
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setStyleSheet("""
+            QLabel {
+                color: #b0b0b0;
+                font-size: 12pt;
+                padding: 20px;
+            }
+        """)
+        layout.addWidget(desc_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_zone_analysis_subtab(self):
+        """Create Zone Analysis sub-tab (Coming Soon)"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Coming soon message
+        coming_soon_label = QLabel("Zone Analysis\nComing Soon")
+        coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        coming_soon_label.setStyleSheet("""
+            QLabel {
+                color: #888;
+                font-size: 24pt;
+                font-weight: bold;
+                padding: 40px;
+            }
+        """)
+        layout.addWidget(coming_soon_label)
+        
+        # Description
+        desc_label = QLabel(
+            "This tab will show:\n"
+            "• Activity by field zones\n"
+            "• Defensive third analysis\n"
+            "• Middle third analysis\n"
+            "• Attacking third analysis\n"
+            "• Zone-based statistics\n"
+            "• And more..."
+        )
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setStyleSheet("""
+            QLabel {
+                color: #b0b0b0;
+                font-size: 12pt;
+                padding: 20px;
+            }
+        """)
+        layout.addWidget(desc_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def update_heat_maps(self):
+        """Update heat maps when tracking data is available"""
+        if not self.tracks:
+            return
+        
+        self.update_heat_map_display()
+    
+    def update_heat_map_display(self):
+        """
+        Update the displayed heat map based on selected radio button
+        Optimized for memory efficiency:
+        - Clears old images before creating new ones
+        - Uses display-optimized size instead of full resolution
+        - Only stores full resolution when saving
+        """
+        if not self.tracks:
+            self.heat_map_label.setText("ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน")
+            self.btn_save_heat_map.setEnabled(False)
+            return
+        
+        try:
+            # Clear old images to free memory
+            if hasattr(self, 'current_heat_map_image'):
+                del self.current_heat_map_image
+            self.current_heat_map_image = None
+            
+            # Import heat map generator
+            from analytics import HeatMapGenerator
+            
+            # Get display size (smaller for display, saves memory)
+            label_size = self.heat_map_label.size()
+            if label_size.width() > 0 and label_size.height() > 0:
+                # Use display size for rendering (max 1280x720 for memory efficiency)
+                display_width = min(label_size.width() - 20, 1280)
+                display_height = min(label_size.height() - 20, 720)
+            else:
+                # Default display size
+                display_width = 1280
+                display_height = 720
+            
+            # Get original field dimensions for full resolution (only when saving)
+            original_field_width = 1920
+            original_field_height = 1080
+            if self.video_frames and len(self.video_frames) > 0:
+                original_field_height, original_field_width = self.video_frames[0].shape[:2]
+            
+            # Use smaller size for display to save memory
+            generator = HeatMapGenerator(field_width=display_width, field_height=display_height)
+            
+            # Generate heat map based on selection (at display resolution)
+            if self.radio_all_players.isChecked():
+                heat_map = generator.generate_player_heat_map(self.tracks, sigma=35.0)
+                title = "Heat Map - All Players"
+                self.current_heat_map_type = "all_players"
+            elif self.radio_team1.isChecked():
+                heat_map = generator.generate_team_heat_map(self.tracks, team_id=1, sigma=35.0)
+                title = "Heat Map - Team 1"
+                self.current_heat_map_type = "team_1"
+            elif self.radio_team2.isChecked():
+                heat_map = generator.generate_team_heat_map(self.tracks, team_id=2, sigma=35.0)
+                title = "Heat Map - Team 2"
+                self.current_heat_map_type = "team_2"
+            elif self.radio_ball.isChecked():
+                heat_map = generator.generate_ball_heat_map(self.tracks, sigma=25.0)
+                title = "Heat Map - Ball"
+                self.current_heat_map_type = "ball"
+            else:
+                heat_map = generator.generate_player_heat_map(self.tracks, sigma=35.0)
+                title = "Heat Map - All Players"
+                self.current_heat_map_type = "all_players"
+            
+            # Create field background (at display resolution)
+            field_bg = generator.create_field_background()
+            
+            # Overlay heat map on field with title (at display resolution)
+            result_image = generator.overlay_heat_map(field_bg, heat_map, title=title)
+            
+            # Convert to QPixmap and display (no need to store full res for display)
+            height, width, channel = result_image.shape
+            bytes_per_line = 3 * width
+            q_image = QImage(result_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
+            pixmap = QPixmap.fromImage(q_image)
+            
+            # Scale to fit label (already at display size, just fit to label)
+            if label_size.width() > 0 and label_size.height() > 0:
+                scaled_pixmap = pixmap.scaled(
+                    label_size.width() - 20, 
+                    label_size.height() - 20,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.heat_map_label.setPixmap(scaled_pixmap)
+            else:
+                self.heat_map_label.setPixmap(pixmap)
+            
+            # Clear intermediate variables to free memory
+            del heat_map, field_bg, result_image, q_image, pixmap
+            if 'scaled_pixmap' in locals():
+                del scaled_pixmap
+            
+            # Store generator and tracks for full resolution generation when saving
+            self.heat_map_generator = generator
+            self.original_field_size = (original_field_width, original_field_height)
+            self.current_heat_map_title = title
+            
+            # Enable save button
+            self.btn_save_heat_map.setEnabled(True)
+                
+        except Exception as e:
+            self.heat_map_label.setText(f"เกิดข้อผิดพลาด: {str(e)}")
+            self.btn_save_heat_map.setEnabled(False)
+            import traceback
+            print(traceback.format_exc())
+    
+    def save_heat_map(self):
+        """
+        Save current heat map as PNG file
+        Generates full resolution image only when saving (memory efficient)
+        Opens file dialog first, then processes and saves
+        """
+        if not self.tracks:
+            QMessageBox.warning(self, "ข้อผิดพลาด", "ไม่มี Heat Map ที่จะบันทึก")
+            return
+        
+        try:
+            from datetime import datetime
+            
+            # Get save location from user first
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create default filename
+            type_name_map = {
+                "all_players": "AllPlayers",
+                "team_1": "Team1",
+                "team_2": "Team2",
+                "ball": "Ball"
+            }
+            type_name = type_name_map.get(self.current_heat_map_type, "heatmap")
+            default_filename = f"heatmap_{type_name}_{timestamp}.png"
+            
+            # Open file dialog immediately
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "บันทึก Heat Map",
+                os.path.join(PROJECT_ROOT, "output", default_filename),
+                "PNG Files (*.png);;All Files (*)"
+            )
+            
+            # Only process if user selected a file
+            if file_path:
+                # Generate full resolution heat map only when saving
+                from analytics import HeatMapGenerator
+                
+                # Get original field dimensions
+                field_width, field_height = self.original_field_size
+                
+                # Create generator with full resolution
+                generator = HeatMapGenerator(field_width=field_width, field_height=field_height)
+                
+                # Generate heat map at full resolution
+                if self.current_heat_map_type == "all_players":
+                    heat_map = generator.generate_player_heat_map(self.tracks, sigma=35.0)
+                    title = "Heat Map - All Players"
+                elif self.current_heat_map_type == "team_1":
+                    heat_map = generator.generate_team_heat_map(self.tracks, team_id=1, sigma=35.0)
+                    title = "Heat Map - Team 1"
+                elif self.current_heat_map_type == "team_2":
+                    heat_map = generator.generate_team_heat_map(self.tracks, team_id=2, sigma=35.0)
+                    title = "Heat Map - Team 2"
+                elif self.current_heat_map_type == "ball":
+                    heat_map = generator.generate_ball_heat_map(self.tracks, sigma=25.0)
+                    title = "Heat Map - Ball"
+                else:
+                    heat_map = generator.generate_player_heat_map(self.tracks, sigma=35.0)
+                    title = "Heat Map - All Players"
+                
+                # Create field background at full resolution
+                field_bg = generator.create_field_background()
+                
+                # Overlay heat map with title at full resolution
+                full_res_image = generator.overlay_heat_map(field_bg, heat_map, title=title)
+                
+                # Save full resolution image
+                import cv2
+                cv2.imwrite(file_path, full_res_image)
+                
+                # Clear full resolution image from memory
+                del full_res_image, heat_map, field_bg
+                
+                QMessageBox.information(
+                    self, 
+                    "สำเร็จ", 
+                    f"บันทึก Heat Map เรียบร้อยแล้ว\n{file_path}"
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "ข้อผิดพลาด", 
+                f"เกิดข้อผิดพลาดในการบันทึกไฟล์:\n{str(e)}"
+            )
+            import traceback
+            print(traceback.format_exc())
+    
+    def update_movement_analysis(self):
+        """Update movement analysis display based on selected options"""
+        if not self.tracks:
+            self.movement_analysis_label.setText("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน")
+            self.movement_analysis_label.setVisible(True)
+            self.movement_stats_text.setVisible(False)
+            self.btn_save_movement.setEnabled(False)
+            return
+        
+        try:
+            from analytics import MovementAnalyzer, HeatMapGenerator
+            
+            # Get field dimensions
+            field_width = 1920
+            field_height = 1080
+            if self.video_frames and len(self.video_frames) > 0:
+                field_height, field_width = self.video_frames[0].shape[:2]
+            
+            # Get team filter
+            team_id = None
+            if self.radio_movement_team1.isChecked():
+                team_id = 1
+            elif self.radio_movement_team2.isChecked():
+                team_id = 2
+            
+            # Initialize analyzer
+            analyzer = MovementAnalyzer(
+                fps=self.video_fps,
+                field_width=field_width,
+                field_height=field_height
+            )
+            
+            # Get display size
+            label_size = self.movement_analysis_label.size()
+            if label_size.width() > 0 and label_size.height() > 0:
+                display_width = min(label_size.width() - 20, 1280)
+                display_height = min(label_size.height() - 20, 720)
+            else:
+                display_width = 1280
+                display_height = 720
+            
+            # Scale field dimensions for display
+            scale_x = display_width / field_width
+            scale_y = display_height / field_height
+            scale = min(scale_x, scale_y)
+            display_field_width = int(field_width * scale)
+            display_field_height = int(field_height * scale)
+            
+            analyzer.field_width = display_field_width
+            analyzer.field_height = display_field_height
+            
+            # Generate visualization based on selection
+            if self.radio_movement_paths.isChecked():
+                # Show movement paths
+                self.movement_analysis_label.setVisible(True)
+                self.movement_stats_text.setVisible(False)
+                
+                # Create field background
+                generator = HeatMapGenerator(field_width=display_field_width, field_height=display_field_height)
+                field_bg = generator.create_field_background()
+                
+                # Draw paths for all players in selected team
+                player_positions = analyzer.get_player_positions_over_time(self.tracks, team_id=team_id)
+                
+                # Use different colors for different players
+                colors = [
+                    (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+                    (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 165, 0),
+                    (255, 192, 203), (0, 128, 128), (128, 128, 0), (128, 0, 0)
+                ]
+                
+                result_image = field_bg.copy()
+                for idx, (pid, positions) in enumerate(player_positions.items()):
+                    color = colors[idx % len(colors)]
+                    result_image = analyzer.draw_movement_path(positions, result_image, color, thickness=2)
+                
+                # Convert to QPixmap
+                height, width, channel = result_image.shape
+                bytes_per_line = 3 * width
+                q_image = QImage(result_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_image)
+                pixmap = pixmap.scaled(
+                    display_width, display_height,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.movement_analysis_label.setPixmap(pixmap)
+                self.current_movement_analysis_image = result_image
+                self.btn_save_movement.setEnabled(True)
+                
+            elif self.radio_speed_zones.isChecked():
+                # Show speed zones heat map
+                self.movement_analysis_label.setVisible(True)
+                self.movement_stats_text.setVisible(False)
+                
+                speed_threshold = self.speed_threshold_spin.value()
+                
+                # Use original field dimensions for analysis
+                full_analyzer = MovementAnalyzer(
+                    fps=self.video_fps,
+                    field_width=field_width,
+                    field_height=field_height
+                )
+                
+                # Generate speed zones heat map at original resolution
+                heat_map = full_analyzer.generate_speed_zones_heat_map(
+                    self.tracks,
+                    speed_threshold=speed_threshold,
+                    team_id=team_id,
+                    sigma=35.0
+                )
+                
+                # Check if heat map is valid
+                if heat_map is None or heat_map.size == 0:
+                    self.movement_analysis_label.setText(f"ไม่มีข้อมูลความเร็วสูงกว่า {speed_threshold} px/s")
+                    self.btn_save_movement.setEnabled(False)
+                    return
+                
+                # Resize heat map to display size
+                heat_map_resized = cv2.resize(heat_map, (display_field_width, display_field_height))
+                
+                # Create field background at display size
+                generator = HeatMapGenerator(field_width=display_field_width, field_height=display_field_height)
+                field_bg = generator.create_field_background()
+                
+                # Blend heat map with field
+                result_image = cv2.addWeighted(field_bg, 0.5, heat_map_resized, 0.7, 0)
+                
+                # Add title
+                title_text = f"Speed Zones (>{speed_threshold} px/s)"
+                if team_id:
+                    title_text += f" - Team {team_id}"
+                cv2.putText(result_image, title_text, (20, 40),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2, cv2.LINE_AA)
+                
+                # Convert to QPixmap
+                height, width, channel = result_image.shape
+                bytes_per_line = 3 * width
+                q_image = QImage(result_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_image)
+                pixmap = pixmap.scaled(
+                    display_width, display_height,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.movement_analysis_label.setPixmap(pixmap)
+                self.current_movement_analysis_image = result_image
+                self.btn_save_movement.setEnabled(True)
+                
+            elif self.radio_speed_chart.isChecked():
+                # Show speed chart
+                self.movement_analysis_label.setVisible(True)
+                self.movement_stats_text.setVisible(False)
+                
+                # Get first player's speed data (or average of all players)
+                analysis = analyzer.analyze_player_movement(self.tracks, team_id=team_id)
+                
+                if analysis:
+                    # Combine speeds from all players
+                    all_speeds = []
+                    for pid, data in analysis.items():
+                        all_speeds.extend(data["speeds"])
+                    
+                    if all_speeds:
+                        # Group by frame and average
+                        speeds_by_frame = {}
+                        for speed, frame in all_speeds:
+                            if frame not in speeds_by_frame:
+                                speeds_by_frame[frame] = []
+                            speeds_by_frame[frame].append(speed)
+                        
+                        avg_speeds = [(np.mean(speeds_by_frame[frame]), frame) 
+                                     for frame in sorted(speeds_by_frame.keys())]
+                        
+                        # Create chart
+                        chart_title = "Average Speed Over Time"
+                        if team_id:
+                            chart_title += f" - Team {team_id}"
+                        
+                        chart_image = analyzer.create_speed_chart(avg_speeds, title=chart_title)
+                        
+                        # Convert to QPixmap
+                        height, width, channel = chart_image.shape
+                        bytes_per_line = 3 * width
+                        q_image = QImage(chart_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
+                        pixmap = QPixmap.fromImage(q_image)
+                        pixmap = pixmap.scaled(
+                            display_width, min(display_height, 400),
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+                        self.movement_analysis_label.setPixmap(pixmap)
+                        self.current_movement_analysis_image = chart_image
+                        self.btn_save_movement.setEnabled(True)
+                    else:
+                        self.movement_analysis_label.setText("ไม่มีข้อมูลความเร็ว")
+                        self.btn_save_movement.setEnabled(False)
+                else:
+                    self.movement_analysis_label.setText("ไม่มีข้อมูลผู้เล่น")
+                    self.btn_save_movement.setEnabled(False)
+                    
+            elif self.radio_movement_stats.isChecked():
+                # Show movement statistics
+                self.movement_analysis_label.setVisible(False)
+                self.movement_stats_text.setVisible(True)
+                
+                analysis = analyzer.analyze_player_movement(self.tracks, team_id=team_id)
+                
+                stats_text = "=== สถิติการเคลื่อนไหว ===\n\n"
+                if team_id:
+                    stats_text += f"ทีม: {team_id}\n\n"
+                else:
+                    stats_text += "ผู้เล่นทั้งหมด\n\n"
+                
+                if analysis:
+                    # Calculate team averages
+                    total_distance = 0.0
+                    total_avg_speed = 0.0
+                    max_speed = 0.0
+                    player_count = 0
+                    
+                    for pid, data in analysis.items():
+                        total_distance += data["total_distance"]
+                        total_avg_speed += data["avg_speed"]
+                        max_speed = max(max_speed, data["max_speed"])
+                        player_count += 1
+                    
+                    if player_count > 0:
+                        stats_text += f"จำนวนผู้เล่น: {player_count}\n"
+                        stats_text += f"ระยะทางรวมเฉลี่ย: {total_distance/player_count:.1f} pixels\n"
+                        stats_text += f"ความเร็วเฉลี่ย: {total_avg_speed/player_count:.1f} px/s\n"
+                        stats_text += f"ความเร็วสูงสุด: {max_speed:.1f} px/s\n\n"
+                    
+                    stats_text += "--- รายละเอียดผู้เล่น ---\n"
+                    stats_text += "⚠️ หน่วย: px = pixels (พิกเซล), px/s = pixels per second\n"
+                    stats_text += "   ข้อมูลนี้เป็นค่าสัมพัทธ์ ใช้สำหรับเปรียบเทียบเท่านั้น\n\n"
+                    for pid, data in analysis.items():
+                        stats_text += f"Player ID {pid}:\n"
+                        stats_text += f"  ระยะทางรวม: {data['total_distance']:.1f} px\n"
+                        stats_text += f"  ความเร็วเฉลี่ย: {data['avg_speed']:.1f} px/s\n"
+                        stats_text += f"  ความเร็วสูงสุด: {data['max_speed']:.1f} px/s\n"
+                        stats_text += f"  ความเร็วต่ำสุด: {data['min_speed']:.1f} px/s\n"
+                        stats_text += f"  เวลาเล่น: {data['total_time']:.1f} วินาที\n"
+                        stats_text += f"  จำนวนเฟรม: {data['num_frames']}\n\n"
+                else:
+                    stats_text += "ไม่มีข้อมูลการเคลื่อนไหว"
+                
+                self.movement_stats_text.setPlainText(stats_text)
+                self.btn_save_movement.setEnabled(False)  # Can't save text as image
+            else:
+                self.movement_analysis_label.setVisible(True)
+                self.movement_stats_text.setVisible(False)
+                
+        except Exception as e:
+            QMessageBox.warning(self, "ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการวิเคราะห์การเคลื่อนไหว:\n{str(e)}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def save_movement_analysis(self):
+        """Save current movement analysis visualization as PNG"""
+        if not hasattr(self, 'current_movement_analysis_image'):
+            QMessageBox.warning(self, "ข้อผิดพลาด", "ไม่มีภาพที่จะบันทึก")
+            return
+        
+        try:
+            from datetime import datetime
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Determine file type
+            if self.radio_movement_paths.isChecked():
+                file_type = "movement_paths"
+            elif self.radio_speed_zones.isChecked():
+                file_type = "speed_zones"
+            elif self.radio_speed_chart.isChecked():
+                file_type = "speed_chart"
+            else:
+                file_type = "movement_analysis"
+            
+            default_filename = f"movement_{file_type}_{timestamp}.png"
+            
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "บันทึกภาพวิเคราะห์การเคลื่อนไหว",
+                os.path.join(PROJECT_ROOT, "output", default_filename),
+                "PNG Files (*.png);;All Files (*)"
+            )
+            
+            if file_path:
+                cv2.imwrite(file_path, self.current_movement_analysis_image)
+                QMessageBox.information(
+                    self,
+                    "สำเร็จ",
+                    f"บันทึกภาพเรียบร้อยแล้ว\n{file_path}"
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "ข้อผิดพลาด",
+                f"เกิดข้อผิดพลาดในการบันทึกไฟล์:\n{str(e)}"
+            )
+            import traceback
+            print(traceback.format_exc())
+    
+    def create_logs_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        title = QLabel("Logs")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #e0e0e0; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Log file selector
+        log_label = QLabel("เลือกไฟล์ Log:")
+        log_label.setStyleSheet("font-weight: bold; margin-top: 10px; color: #e0e0e0;")
+        layout.addWidget(log_label)
+        
+        log_button_layout = QHBoxLayout()
+        self.log_buttons = QButtonGroup()
+        
+        log_files = [
+            (os.path.join(PROJECT_ROOT, "logs", "tracking.log"), "Tracking Log"),
+            (os.path.join(PROJECT_ROOT, "logs", "camera_movement.log"), "Camera Movement Log"),
+            (os.path.join(PROJECT_ROOT, "logs", "memory_access.log"), "Memory Access Log")
+        ]
+        
+        self.log_radio_buttons = {}
+        for log_path, log_name in log_files:
+            radio = QRadioButton(log_name)
+            radio.log_path = log_path
+            self.log_buttons.addButton(radio)
+            log_button_layout.addWidget(radio)
+            self.log_radio_buttons[log_path] = radio
+        
+        for radio in self.log_radio_buttons.values():
+            radio.toggled.connect(lambda checked, r=radio: self.load_log_file(r.log_path) if checked else None)
+        
+        layout.addLayout(log_button_layout)
+        
+        # Log display
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFont(QFont("Consolas", 10))
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1a1a1a;
+                color: #d4d4d4;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 15px;
+            }
+        """)
+        layout.addWidget(self.log_text)
+        
+        # Refresh button (optional - kept for manual refresh if needed)
+        refresh_btn = QPushButton("รีเฟรช (Refresh)")
+        refresh_btn.clicked.connect(self.refresh_logs)
+        layout.addWidget(refresh_btn)
+        
+        # Load initial log file after log_text is created
+        if self.log_radio_buttons:
+            first_button = list(self.log_radio_buttons.values())[0]
+            first_button.setChecked(True)
+            QTimer.singleShot(0, lambda: self.load_log_file(first_button.log_path))
+        
+        # Start auto-refresh timer (refresh every 500ms like terminal)
+        self.log_refresh_timer.start(500)
+        
+        return widget
+    
+    def apply_dark_theme(self):
+        """Apply dark mode + dark red theme"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #1e1e1e;
+            }
+            QWidget {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QFrame {
+                background-color: #2b2b2b;
+                border-radius: 8px;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+            QCheckBox, QRadioButton {
+                color: #e0e0e0;
+                spacing: 8px;
+            }
+            QCheckBox::indicator, QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #2b2b2b;
+            }
+            QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                border-color: #c41e3a;
+            }
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+            QPushButton:pressed {
+                background-color: #a01a2e;
+            }
+            QPushButton:disabled {
+                background-color: #555;
+                color: #888;
+            }
+            QProgressBar {
+                border: 1px solid #555;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+            }
+            QProgressBar::chunk {
+                background-color: #c41e3a;
+                border-radius: 3px;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+        """)
+    
+    def on_demo_selected(self, checked):
+        if checked:
+            sender = self.sender()
+            if sender == self.radio_demo1:
+                self.demo_video = os.path.join(PROJECT_ROOT, "demos", "demo1.mp4")
+                self.video_path = None
+            elif sender == self.radio_demo2:
+                self.demo_video = os.path.join(PROJECT_ROOT, "demos", "demo2.mp4")
+                self.video_path = None
+            
+            if os.path.exists(self.demo_video):
+                self.selected_video_label.setText("")
+                self.preview_video.load_video(self.demo_video)
+                self.btn_start.setEnabled(True)
+            else:
+                self.selected_video_label.setText("ไม่พบไฟล์วิดีโอ")
+                self.btn_start.setEnabled(False)
+    
+    def browse_video(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "เลือกไฟล์วิดีโอ",
+            "",
+            "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.flv *.wmv *.m4v *.3gp);;All Files (*)"
+        )
+        
+        if file_path:
+            self.video_path = file_path
+            self.demo_video = None
+            self.radio_demo1.setChecked(False)
+            self.radio_demo2.setChecked(False)
+            
+            self.selected_video_label.setText(f"ไฟล์ที่เลือก: {os.path.basename(file_path)}")
+            self.preview_video.load_video(file_path)
+            self.btn_start.setEnabled(True)
+    
+    def get_selected_classes(self):
+        """Get list of class IDs based on selected checkboxes"""
+        classes = []
+        # ball: 0, goalkeeper: 1, player: 2, referee: 3, stats: 4
+        if self.checkbox_ball.isChecked():
+            classes.append(0)
+        if self.checkbox_goalkeepers.isChecked():
+            classes.append(1)
+        if self.checkbox_players.isChecked():
+            classes.append(2)
+        if self.checkbox_referees.isChecked():
+            classes.append(3)
+        if self.checkbox_stats.isChecked():
+            classes.append(4)
+        return classes
+    
+    def start_analysis(self):
+        # Get video path
+        video_to_process = self.video_path if self.video_path else self.demo_video
+        
+        if not video_to_process or not os.path.exists(video_to_process):
+            QMessageBox.warning(self, "ข้อผิดพลาด", "กรุณาเลือกวิดีโอก่อนเริ่มวิเคราะห์")
+            return
+        
+        classes = self.get_selected_classes()
+        if not classes:
+            QMessageBox.warning(self, "ข้อผิดพลาด", "กรุณาเลือกอย่างน้อย 1 ตัวเลือกการแสดงผล")
+            return
+        
+        # Disable button and show progress
+        self.btn_start.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        self.status_label.setText("กำลังประมวลผล...")
+        self.status_label.setStyleSheet("color: #c41e3a; font-weight: bold;")
+        
+        # Start processing in separate thread
+        self.processing_thread = VideoProcessingThread(video_to_process, classes, verbose=True)
+        self.processing_thread.finished.connect(self.on_processing_finished)
+        self.processing_thread.progress.connect(self.update_status)
+        self.processing_thread.start()
+    
+    def update_status(self, message):
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet("color: #c41e3a; font-weight: bold;")
+    
+    def on_processing_finished(self, success, output_path):
+        self.progress_bar.setVisible(False)
+        self.btn_start.setEnabled(True)
+        
+        if success:
+            self.processed = True
+            self.status_label.setText("✓ ประมวลผลเสร็จสิ้น!")
+            self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            
+            # Store tracking data from processing thread
+            if self.processing_thread and self.processing_thread.tracks:
+                self.tracks = self.processing_thread.tracks
+                self.video_frames = self.processing_thread.frames
+                self.video_fps = self.processing_thread.fps if hasattr(self.processing_thread, 'fps') else 30
+                # Update heat maps in AI Results tab
+                self.update_heat_maps()
+                # Update statistics in AI Results tab
+                self.update_statistics()
+                # Update movement analysis in AI Results tab
+                self.update_movement_analysis()
+            
+            # Update results tab with actual output path
+            if output_path and os.path.exists(output_path):
+                self.result_video_player.load_video(output_path)
+                self.btn_open_output.setEnabled(True)
+                self.current_output_path = output_path
+                # Switch to results tab
+                self.tabs.setCurrentIndex(2)  # Video Preview tab
+            else:
+                # Fallback to old path
+                output_path = os.path.join(PROJECT_ROOT, "output", "output.mp4")
+                if os.path.exists(output_path):
+                    self.result_video_player.load_video(output_path)
+                    self.btn_open_output.setEnabled(True)
+                    self.current_output_path = output_path
+            
+            QMessageBox.information(self, "สำเร็จ", "การประมวลผลวิดีโอเสร็จสิ้นแล้ว!\nกรุณาไปที่แท็บ Video Preview หรือ AI Results เพื่อดูผลลัพธ์")
+        else:
+            self.status_label.setText("✗ เกิดข้อผิดพลาดในการประมวลผล")
+            self.status_label.setStyleSheet("color: #f44336; font-weight: bold;")
+            QMessageBox.critical(self, "ข้อผิดพลาด", "เกิดข้อผิดพลาดในการประมวลผลวิดีโอ\nกรุณาลองใหม่อีกครั้ง")
+    
+    def open_video_file(self):
+        """Open video file dialog and load selected video in player"""
+        output_folder = os.path.join(PROJECT_ROOT, "output")
+        
+        # Create output folder if it doesn't exist
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder, exist_ok=True)
+        
+        # Video file filter - support common video formats
+        video_filter = (
+            "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.flv *.wmv *.mpeg *.mpg *.m4v *.3gp);;"
+            "MP4 Files (*.mp4);;"
+            "AVI Files (*.avi);;"
+            "MOV Files (*.mov);;"
+            "MKV Files (*.mkv);;"
+            "WebM Files (*.webm);;"
+            "All Files (*.*)"
+        )
+        
+        video_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "เลือกไฟล์วิดีโอ",
+            output_folder,
+            video_filter
+        )
+        
+        if video_path and os.path.exists(video_path):
+            # Load video in the result video player
+            self.result_video_player.load_video(video_path)
+            self.current_output_path = video_path
+        elif video_path:
+            QMessageBox.warning(self, "ไม่พบไฟล์", f"ไม่พบไฟล์วิดีโอ: {video_path}")
+    
+    def open_output_folder(self):
+        output_folder = os.path.join(PROJECT_ROOT, "output")
+        if os.path.exists(output_folder):
+            if sys.platform == "win32":
+                os.startfile(output_folder)
+            elif sys.platform == "darwin":
+                os.system(f"open {output_folder}")
+            else:
+                os.system(f"xdg-open {output_folder}")
+        else:
+            QMessageBox.warning(self, "ไม่พบโฟลเดอร์", "ไม่พบโฟลเดอร์ผลลัพธ์")
+    
+    def load_log_file(self, log_path):
+        try:
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.log_text.setPlainText(content)
+                # Scroll to bottom
+                cursor = self.log_text.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.log_text.setTextCursor(cursor)
+                # Store current log path for auto-refresh
+                self.current_log_path = log_path
+            else:
+                self.log_text.setPlainText(f"ไม่พบไฟล์: {log_path}")
+                self.current_log_path = log_path
+        except Exception as e:
+            self.log_text.setPlainText(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {str(e)}")
+            self.current_log_path = log_path
+    
+    def refresh_logs(self):
+        for radio in self.log_radio_buttons.values():
+            if radio.isChecked():
+                self.load_log_file(radio.log_path)
+                break
+    
+    def auto_refresh_logs(self):
+        """Auto-refresh the currently displayed log file (called by timer)"""
+        if self.current_log_path:
+            try:
+                if os.path.exists(self.current_log_path):
+                    with open(self.current_log_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    # Only update if content changed to avoid unnecessary UI updates
+                    current_content = self.log_text.toPlainText()
+                    if content != current_content:
+                        self.log_text.setPlainText(content)
+                        # Scroll to bottom
+                        cursor = self.log_text.textCursor()
+                        cursor.movePosition(cursor.MoveOperation.End)
+                        self.log_text.setTextCursor(cursor)
+            except Exception:
+                pass  # Silently ignore errors during auto-refresh
+    
+    def create_mode_selection_tab(self):
+        """Create beautiful landing page with logo and animated welcome message"""
+        widget = QWidget()
+        widget.setStyleSheet("background-color: #000000;")
+        
+        # Get DPI scaling factor for responsive sizing
+        app = QApplication.instance()
+        dpi_scale = 1.0
+        if app:
+            try:
+                # Get device pixel ratio (handles 100%, 125%, 150% scaling)
+                dpi_scale = app.devicePixelRatio()
+                # Normalize to reasonable scale (1.0, 1.25, 1.5)
+                if dpi_scale > 1.5:
+                    dpi_scale = 1.5
+                elif dpi_scale > 1.25:
+                    dpi_scale = 1.25
+                else:
+                    dpi_scale = 1.0
+            except:
+                dpi_scale = 1.0
+        
+        # Base sizes (for 100% scaling)
+        base_logo_size = int(700 * dpi_scale)  # Increased from 500 to 700
+        base_font_info = int(10 * dpi_scale)
+        
+        # Main layout
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(int(40 * dpi_scale), int(30 * dpi_scale), 
+                                       int(40 * dpi_scale), int(30 * dpi_scale))
+        main_layout.setSpacing(int(30 * dpi_scale))
+        
+        # ========== LOGO SECTION (Top) - Main Brand Identity ==========
+        logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+        logo_label = QLabel()
+        
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Scale logo larger - using as main brand identity
+            pixmap = pixmap.scaled(base_logo_size, base_logo_size, 
+                                  Qt.AspectRatioMode.KeepAspectRatio, 
+                                  Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+        else:
+            # Fallback if logo not found
+            logo_label.setText("FREE Football Analysis")
+            logo_label.setStyleSheet(f"color: #ffffff; font-size: {int(72 * dpi_scale)}pt; font-weight: bold;")
+        
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: transparent;
+                padding: {int(20 * dpi_scale)}px;
+            }}
+        """)
+        main_layout.addWidget(logo_label)
+        
+        # ========== INFORMATION SECTION ==========
+        info_frame = QFrame()
+        info_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: rgba(139, 21, 56, 0.1);
+                border: 1px solid rgba(139, 21, 56, 0.3);
+                border-radius: {int(12 * dpi_scale)}px;
+                padding: {int(20 * dpi_scale)}px;
+            }}
+        """)
+        # Set size policy to not expand
+        info_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(int(25 * dpi_scale), int(20 * dpi_scale), 
+                                      int(25 * dpi_scale), int(20 * dpi_scale))
+        info_layout.setSpacing(int(15 * dpi_scale))
+        
+        # Version Information
+        version_section = QHBoxLayout()
+        version_label = QLabel("เวอร์ชัน:")
+        version_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(80 * dpi_scale)}px;")
+        version_section.addWidget(version_label)
+        
+        version_value = QLabel("1.0.0")
+        version_value.setStyleSheet(f"color: #ffffff; font-size: {base_font_info}pt;")
+        version_section.addWidget(version_value)
+        version_section.addStretch()
+        
+        build_label = QLabel("Build:")
+        build_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(60 * dpi_scale)}px;")
+        version_section.addWidget(build_label)
+        
+        build_value = QLabel("2025.12")
+        build_value.setStyleSheet(f"color: #ffffff; font-size: {base_font_info}pt;")
+        version_section.addWidget(build_value)
+        
+        info_layout.addLayout(version_section)
+        
+        # Separator
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine)
+        separator1.setStyleSheet("background-color: rgba(139, 21, 56, 0.3); max-height: 1px;")
+        info_layout.addWidget(separator1)
+        
+        # Developer Information - All in one line with beautiful styling
+        developer_section = QHBoxLayout()
+        developer_section.setSpacing(int(10 * dpi_scale))
+        
+        developer_label = QLabel("ผู้พัฒนา:")
+        developer_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(80 * dpi_scale)}px;")
+        developer_section.addWidget(developer_label)
+        
+        # Developer Name
+        developer_name = QLabel("นายพัชระ อัลอุมารี")
+        developer_name.setStyleSheet(f"color: #ffffff; font-size: {base_font_info}pt;")
+        developer_section.addWidget(developer_name)
+        
+        # Separator
+        separator_dev = QLabel("|")
+        separator_dev.setStyleSheet(f"color: rgba(139, 21, 56, 0.5); font-size: {base_font_info}pt; padding: 0 {int(10 * dpi_scale)}px;")
+        developer_section.addWidget(separator_dev)
+        
+        # Email - styled beautifully
+        email_value = QLabel("Email : Patcharaalumaree@gmail.com")
+        email_value.setStyleSheet(f"""
+            color: #ffffff; 
+            font-size: {base_font_info}pt;
+            padding: {int(2 * dpi_scale)}px {int(8 * dpi_scale)}px;
+            background-color: rgba(139, 21, 56, 0.15);
+            border-radius: {int(4 * dpi_scale)}px;
+        """)
+        developer_section.addWidget(email_value)
+        
+        # Separator
+        separator_email = QLabel("|")
+        separator_email.setStyleSheet(f"color: rgba(139, 21, 56, 0.5); font-size: {base_font_info}pt; padding: 0 {int(10 * dpi_scale)}px;")
+        developer_section.addWidget(separator_email)
+        
+        # GitHub Link - styled beautifully
+        github_link = QLabel('<a href="https://github.com/MrPatchara" style="color: #8b1538; text-decoration: none; font-weight: bold;">GitHub</a>')
+        github_link.setStyleSheet(f"""
+            color: #8b1538; 
+            font-size: {base_font_info}pt;
+            padding: {int(2 * dpi_scale)}px {int(8 * dpi_scale)}px;
+            background-color: rgba(139, 21, 56, 0.15);
+            border-radius: {int(4 * dpi_scale)}px;
+        """)
+        github_link.setOpenExternalLinks(True)
+        github_link.setTextFormat(Qt.TextFormat.RichText)
+        developer_section.addWidget(github_link)
+        
+        developer_section.addStretch()
+        info_layout.addLayout(developer_section)
+        
+        # Center the info frame
+        center_container = QWidget()
+        center_layout = QHBoxLayout(center_container)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.addStretch()
+        center_layout.addWidget(info_frame)
+        center_layout.addStretch()
+        
+        main_layout.addWidget(center_container)
+        
+        main_layout.addStretch()
+        
+        return widget
+    
+    def switch_mode(self, mode: str):
+        """Switch between AI and Manual mode"""
+        self.current_mode = mode
+        if mode == "AI":
+            # Switch to AI Usage tab
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == "AI - Usage":
+                    self.tabs.setCurrentIndex(i)
+                    break
+        else:
+            # Switch to Manual Tracking tab
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == "Manual Tracking":
+                    self.tabs.setCurrentIndex(i)
+                    break
+    
+    def create_manual_tracking_tab(self):
+        """Create manual tracking tab (Manual Tracking)"""
+        widget = QWidget()
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Top section: Video player and Event Tracking side by side
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        top_splitter.setChildrenCollapsible(False)
+        
+        # Left side: Video player
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        
+        # Video load section
+        video_load_layout = QHBoxLayout()
+        self.manual_load_video_btn = QPushButton("เพิ่มวิดีโอ")
+        self.manual_load_video_btn.clicked.connect(self.load_video_for_manual_tracking)
+        video_load_layout.addWidget(self.manual_load_video_btn)
+        
+        # Help button
+        self.manual_help_btn = QPushButton("วิธีใช้งาน")
+        self.manual_help_btn.setToolTip("เปิดหน้าต่างช่วยเหลือ")
+        self.manual_help_btn.setFixedSize(110, 35)
+        self.manual_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 10pt;
+                font-weight: bold;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #0D47A1;
+            }
+        """)
+        self.manual_help_btn.clicked.connect(self.show_manual_tracking_help)
+        video_load_layout.addWidget(self.manual_help_btn)
+        
+        video_load_layout.addStretch()
+        left_layout.addLayout(video_load_layout)
+        
+        # Video player - responsive sizing
+        self.manual_video_player = VideoPlayerWidget()
+        self.manual_video_player.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        left_layout.addWidget(self.manual_video_player, 1)
+        
+        left_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        top_splitter.addWidget(left_panel)
+        
+        # Right side: Event Tracking panel
+        right_panel = QWidget()
+        right_panel.setMinimumWidth(300)
+        right_panel.setMaximumWidth(400)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+        
+        # Event buttons panel
+        events_group = QGroupBox("Event Tracking")
+        events_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #e0e0e0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #c41e3a;
+            }
+        """)
+        events_layout = QVBoxLayout()
+        
+        # Team selection - editable text fields
+        team1_layout = QHBoxLayout()
+        team1_label = QLabel("ทีม 1:")
+        team1_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
+        self.team1_input = QLineEdit()
+        self.team1_input.setPlaceholderText("กรอกชื่อทีม 1")
+        self.team1_input.setText("ทีม 1")
+        self.team1_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QLineEdit:focus {
+                border-color: #c41e3a;
+            }
+        """)
+        team1_layout.addWidget(team1_label)
+        team1_layout.addWidget(self.team1_input)
+        events_layout.addLayout(team1_layout)
+        
+        team2_layout = QHBoxLayout()
+        team2_label = QLabel("ทีม 2:")
+        team2_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
+        self.team2_input = QLineEdit()
+        self.team2_input.setPlaceholderText("กรอกชื่อทีม 2")
+        self.team2_input.setText("ทีม 2")
+        self.team2_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QLineEdit:focus {
+                border-color: #c41e3a;
+            }
+        """)
+        team2_layout.addWidget(team2_label)
+        team2_layout.addWidget(self.team2_input)
+        events_layout.addLayout(team2_layout)
+        
+        # Player settings buttons
+        players_settings_layout = QHBoxLayout()
+        self.team1_players_btn = QPushButton("ตั้งค่ารายชื่อทีม 1")
+        self.team1_players_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 5px 10px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.team1_players_btn.clicked.connect(lambda: self.show_players_dialog(1))
+        
+        self.team2_players_btn = QPushButton("ตั้งค่ารายชื่อทีม 2")
+        self.team2_players_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 5px 10px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        self.team2_players_btn.clicked.connect(lambda: self.show_players_dialog(2))
+        
+        players_settings_layout.addWidget(self.team1_players_btn)
+        players_settings_layout.addWidget(self.team2_players_btn)
+        events_layout.addLayout(players_settings_layout)
+        
+        # Team and Half selection in one row
+        team_half_layout = QHBoxLayout()
+        
+        # Team selection
+        team_select_label = QLabel("เลือกทีม:")
+        team_select_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
+        self.team_combo = QComboBox()
+        self.team_combo.addItems(["ทีม 1", "ทีม 2", "กลาง"])
+        self.team_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+                min-width: 100px;
+            }
+            QComboBox:hover {
+                border-color: #c41e3a;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                selection-background-color: #c41e3a;
+            }
+        """)
+        # Update team combo when team names change
+        self.team1_input.textChanged.connect(self.update_team_combo)
+        self.team2_input.textChanged.connect(self.update_team_combo)
+        
+        # Half selection
+        half_label = QLabel("ครึ่ง:")
+        half_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
+        self.half_combo = QComboBox()
+        self.half_combo.addItems(["ครึ่งแรก", "ครึ่งหลัง", "ต่อเวลาครึ่งแรก", "ต่อเวลาครึ่งหลัง"])
+        self.half_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+                min-width: 120px;
+            }
+            QComboBox:hover {
+                border-color: #c41e3a;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                selection-background-color: #c41e3a;
+            }
+        """)
+        
+        team_half_layout.addWidget(team_select_label)
+        team_half_layout.addWidget(self.team_combo)
+        team_half_layout.addSpacing(20)
+        team_half_layout.addWidget(half_label)
+        team_half_layout.addWidget(self.half_combo)
+        team_half_layout.addStretch()
+        events_layout.addLayout(team_half_layout)
+        
+        # Customize button
+        customize_layout = QHBoxLayout()
+        self.customize_events_btn = QPushButton("ปรับแต่งปุ่ม")
+        self.customize_events_btn.clicked.connect(self.show_customize_events_dialog)
+        customize_layout.addWidget(self.customize_events_btn)
+        customize_layout.addStretch()
+        events_layout.addLayout(customize_layout)
+        
+        # Event buttons grid - use grid layout for compact buttons
+        events_grid = QWidget()
+        grid_layout = QVBoxLayout(events_grid)
+        grid_layout.setSpacing(5)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create button rows (2 columns)
+        self.event_buttons = {}
+        self.event_outcomes = {}  # Store outcomes for each event type
+        row_layout = None
+        for idx, event_data in enumerate(self.default_event_types):
+            if len(event_data) == 3:
+                event_name, color, outcomes = event_data
+            else:
+                # Backward compatibility
+                event_name, color = event_data[:2]
+                outcomes = []
+            
+            self.event_outcomes[event_name] = outcomes
+            
+            if idx % 2 == 0:
+                row_layout = QHBoxLayout()
+                row_layout.setSpacing(5)
+                grid_layout.addLayout(row_layout)
+            
+            btn = QPushButton(event_name)
+            btn.setMinimumSize(120, 40)
+            btn.setMaximumSize(120, 40)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {color};
+                    color: white;
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 10pt;
+                    border: 2px solid {color};
+                }}
+                QPushButton:hover {{
+                    background-color: {color}dd;
+                    border-color: white;
+                }}
+                QPushButton:pressed {{
+                    background-color: {color}aa;
+                }}
+            """)
+            btn.clicked.connect(lambda checked, e=event_name: self.on_event_button_clicked(e))
+            btn.setVisible(event_name in self.enabled_events)
+            row_layout.addWidget(btn)
+            self.event_buttons[event_name] = btn
+        
+        # Add stretch to fill remaining space
+        grid_layout.addStretch()
+        
+        events_layout.addWidget(events_grid)
+        events_group.setLayout(events_layout)
+        right_layout.addWidget(events_group, 1)  # Make it expand
+        
+        top_splitter.addWidget(right_panel)
+        
+        # Set splitter sizes (70% video, 30% events)
+        top_splitter.setSizes([700, 300])
+        main_layout.addWidget(top_splitter, 1)  # Make top section expand
+        
+        # Bottom section: Event List (scrollable)
+        events_list_group = QGroupBox("Event List")
+        events_list_group.setStyleSheet(events_group.styleSheet())
+        events_list_group.setFixedHeight(300)  # Fixed height to match with Event Tracking
+        events_list_layout = QVBoxLayout()
+        
+        # Event table with scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c41e3a;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #d63347;
+            }
+        """)
+        
+        self.events_table = QTableWidget()
+        self.events_table.setColumnCount(7)
+        self.events_table.setHorizontalHeaderLabels(["เวลา", "เหตุการณ์", "ผลลัพธ์", "ทีม", "ครึ่ง", "ผู้เล่น", "การจัดการ"])
+        self.events_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.events_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                gridline-color: #555;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #c41e3a;
+            }
+            QHeaderView::section {
+                background-color: #2b2b2b;
+                color: #c41e3a;
+                padding: 8px;
+                border: 1px solid #555;
+                font-weight: bold;
+            }
+        """)
+        # Enable double-click to jump to timestamp
+        self.events_table.itemDoubleClicked.connect(self.on_event_double_clicked)
+        scroll_area.setWidget(self.events_table)
+        events_list_layout.addWidget(scroll_area)
+        
+        # Buttons for event list
+        event_buttons_layout = QHBoxLayout()
+        self.delete_event_btn = QPushButton("ลบที่เลือก")
+        self.delete_event_btn.clicked.connect(self.delete_selected_event)
+        event_buttons_layout.addWidget(self.delete_event_btn)
+        
+        self.clear_events_btn = QPushButton("ลบทั้งหมด")
+        self.clear_events_btn.clicked.connect(self.clear_all_events)
+        event_buttons_layout.addWidget(self.clear_events_btn)
+        
+        self.export_btn = QPushButton("ส่งออก CSV")
+        self.export_btn.clicked.connect(self.export_tracking_to_csv)
+        event_buttons_layout.addWidget(self.export_btn)
+        
+        events_list_layout.addLayout(event_buttons_layout)
+        events_list_group.setLayout(events_list_layout)
+        main_layout.addWidget(events_list_group, 1)
+        
+        return widget
+    
+    def update_team_combo(self):
+        """Update team combo box with current team names"""
+        current_selection = self.team_combo.currentText()
+        team1_name = self.team1_input.text() if self.team1_input.text() else "ทีม 1"
+        team2_name = self.team2_input.text() if self.team2_input.text() else "ทีม 2"
+        
+        # Update team names in manual_tracking_data
+        if self.manual_tracking_data:
+            self.manual_tracking_data.team_a_name = team1_name
+            self.manual_tracking_data.team_b_name = team2_name
+        
+        self.team_combo.clear()
+        self.team_combo.addItems([team1_name, team2_name, "กลาง"])
+        
+        # Try to restore selection
+        if current_selection in [team1_name, "ทีม 1"]:
+            self.team_combo.setCurrentIndex(0)
+        elif current_selection in [team2_name, "ทีม 2"]:
+            self.team_combo.setCurrentIndex(1)
+        else:
+            self.team_combo.setCurrentIndex(2)
+    
+    def on_event_button_clicked(self, event_type: str):
+        """Handle event button click - show outcome dialog if needed"""
+        outcomes = self.event_outcomes.get(event_type, [])
+        
+        # Pause video if playing to capture accurate timestamp
+        was_playing = False
+        if not self.manual_video_player.media_player.source().isEmpty():
+            if self.manual_video_player.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                was_playing = True
+                self.manual_video_player.media_player.pause()
+        
+        if len(outcomes) > 1:
+            # Show outcome selection dialog
+            self.show_outcome_dialog(event_type, outcomes, was_playing)
+        else:
+            # No outcome needed or only one option
+            outcome = outcomes[0] if outcomes else None
+            # If outcome is "ประตู", show goal dialog
+            if outcome == "ประตู":
+                self.show_goal_dialog(event_type, outcome, was_playing)
+            else:
+                self.add_tracking_event(event_type, outcome)
+                # Resume video if it was playing
+                if was_playing:
+                    self.manual_video_player.media_player.play()
+    
+    def show_outcome_dialog(self, event_type: str, outcomes: list, was_playing: bool = False):
+        """Show dialog to select outcome"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"เลือกผลลัพธ์ - {event_type}")
+        dialog.setMinimumSize(300, 200)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        
+        title = QLabel(f"เลือกผลลัพธ์สำหรับ: {event_type}")
+        title.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-bottom: 15px;")
+        layout.addWidget(title)
+        
+        # Create outcome buttons
+        outcome_buttons = []
+        for outcome in outcomes:
+            btn = QPushButton(outcome)
+            btn.setMinimumHeight(40)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3a3a3a;
+                    color: #e0e0e0;
+                    border: 2px solid #555;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #c41e3a;
+                    border-color: #c41e3a;
+                }
+            """)
+            btn.clicked.connect(lambda checked, o=outcome: self.on_outcome_selected(event_type, o, dialog, was_playing))
+            layout.addWidget(btn)
+            outcome_buttons.append(btn)
+        
+        # Cancel button
+        cancel_btn = QPushButton("ยกเลิก")
+        cancel_btn.clicked.connect(lambda: self.on_outcome_cancelled(dialog, was_playing))
+        layout.addWidget(cancel_btn)
+        
+        dialog.exec()
+    
+    def on_outcome_selected(self, event_type: str, outcome: str, dialog: QDialog, was_playing: bool = False):
+        """Handle outcome selection"""
+        dialog.accept()
+        
+        # If outcome is "ประตู", always show goal dialog
+        if outcome == "ประตู":
+            self.show_goal_dialog(event_type, outcome, was_playing)
+        else:
+            self.add_tracking_event(event_type, outcome)
+            # Resume video if it was playing
+            if was_playing:
+                self.manual_video_player.media_player.play()
+    
+    def on_outcome_cancelled(self, dialog: QDialog, was_playing: bool = False):
+        """Handle outcome dialog cancellation"""
+        dialog.reject()
+        # Resume video if it was playing
+        if was_playing:
+            self.manual_video_player.media_player.play()
+    
+    def show_players_dialog(self, team_num: int):
+        """Show dialog to input players for a team with name, surname, and position"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"ตั้งค่ารายชื่อทีม {team_num}")
+        dialog.setMinimumSize(600, 500)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QTableWidget {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                gridline-color: #444;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #c41e3a;
+            }
+            QHeaderView::section {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                padding: 8px;
+                border: 1px solid #555;
+                font-weight: bold;
+            }
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 5px;
+            }
+            QLineEdit:focus {
+                border-color: #c41e3a;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        
+        title = QLabel(f"กรอกรายชื่อนักเตะทีม {team_num}")
+        title.setStyleSheet("font-weight: bold; font-size: 14pt; color: #c41e3a; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        instruction = QLabel("กรอกข้อมูลนักเตะ: ชื่อ, นามสกุล, ตำแหน่ง (สามารถเพิ่มแถวได้โดยกด Enter)")
+        instruction.setStyleSheet("color: #b0b0b0; margin-bottom: 10px;")
+        layout.addWidget(instruction)
+        
+        # Create table for players
+        players_table = QTableWidget()
+        players_table.setColumnCount(3)
+        players_table.setHorizontalHeaderLabels(["ชื่อ", "นามสกุล", "ตำแหน่ง"])
+        players_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        players_table.setRowCount(20)  # Start with 20 rows
+        
+        # Load existing players
+        current_players = self.team1_players if team_num == 1 else self.team2_players
+        for row, player in enumerate(current_players):
+            if row >= 20:
+                players_table.setRowCount(row + 1)
+            if isinstance(player, dict):
+                players_table.setItem(row, 0, QTableWidgetItem(player.get('name', '')))
+                players_table.setItem(row, 1, QTableWidgetItem(player.get('surname', '')))
+                players_table.setItem(row, 2, QTableWidgetItem(player.get('position', '')))
+            else:
+                # Backward compatibility: if it's a string, put it in name column
+                players_table.setItem(row, 0, QTableWidgetItem(str(player)))
+        
+        layout.addWidget(players_table)
+        
+        # Buttons
+        buttons_layout = QHBoxLayout()
+        add_row_btn = QPushButton("เพิ่มแถว")
+        add_row_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 5px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        add_row_btn.clicked.connect(lambda: players_table.setRowCount(players_table.rowCount() + 1))
+        buttons_layout.addWidget(add_row_btn)
+        buttons_layout.addStretch()
+        
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        button_box.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+        """)
+        buttons_layout.addWidget(button_box)
+        layout.addLayout(buttons_layout)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            players = []
+            for row in range(players_table.rowCount()):
+                name_item = players_table.item(row, 0)
+                surname_item = players_table.item(row, 1)
+                position_item = players_table.item(row, 2)
+                
+                name = name_item.text().strip() if name_item else ""
+                surname = surname_item.text().strip() if surname_item else ""
+                position = position_item.text().strip() if position_item else ""
+                
+                # Only add if at least name is provided
+                if name or surname:
+                    players.append({
+                        'name': name,
+                        'surname': surname,
+                        'position': position,
+                        'full_name': f"{name} {surname}".strip() if name or surname else ""
+                    })
+            
+            if team_num == 1:
+                self.team1_players = players
+                if self.manual_tracking_data:
+                    # Convert to list of full names for backward compatibility
+                    self.manual_tracking_data.team_a_players = [p['full_name'] or p['name'] for p in players]
+            else:
+                self.team2_players = players
+                if self.manual_tracking_data:
+                    self.manual_tracking_data.team_b_players = [p['full_name'] or p['name'] for p in players]
+    
+    def show_goal_dialog(self, event_type: str, outcome: str, was_playing: bool = False):
+        """Show goal dialog when outcome is 'ประตู' - always show for all goals"""
+        if self.manual_video_player.media_player.source().isEmpty():
+            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อนบันทึกประตู")
+            if was_playing:
+                self.manual_video_player.media_player.play()
+            return
+        
+        # Ensure video is paused while dialog is open
+        if was_playing:
+            self.manual_video_player.media_player.pause()
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("บันทึกประตู")
+        dialog.setMinimumSize(350, 200)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+            QComboBox {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        
+        title = QLabel("บันทึกประตู")
+        title.setStyleSheet("font-weight: bold; font-size: 14pt; color: #c41e3a; margin-bottom: 15px;")
+        layout.addWidget(title)
+        
+        # Team selection
+        team_layout = QHBoxLayout()
+        team_label = QLabel("ทีมที่ได้ประตู:")
+        team_label.setStyleSheet("font-weight: bold;")
+        team_combo = QComboBox()
+        team_combo.addItems([self.team1_input.text() or "ทีม 1", self.team2_input.text() or "ทีม 2"])
+        team_layout.addWidget(team_label)
+        team_layout.addWidget(team_combo)
+        layout.addLayout(team_layout)
+        
+        # Player selection (if players are available)
+        player_layout = QHBoxLayout()
+        player_label = QLabel("ผู้ยิงประตู:")
+        player_label.setStyleSheet("font-weight: bold;")
+        player_combo = QComboBox()
+        player_combo.addItem("ไม่ระบุ")
+        
+        def update_player_list(team_index):
+            player_combo.clear()
+            player_combo.addItem("ไม่ระบุ")
+            players_list = self.team1_players if team_index == 0 else self.team2_players
+            for player in players_list:
+                if isinstance(player, dict):
+                    display_name = player.get('full_name') or player.get('name', '')
+                    if display_name:
+                        player_combo.addItem(display_name)
+                else:
+                    # Backward compatibility
+                    if player:
+                        player_combo.addItem(str(player))
+        
+        team_combo.currentIndexChanged.connect(update_player_list)
+        update_player_list(0)  # Initialize with team 1
+        
+        player_layout.addWidget(player_label)
+        player_layout.addWidget(player_combo)
+        layout.addLayout(player_layout)
+        
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        button_box.setStyleSheet("""
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+        """)
+        layout.addWidget(button_box)
+        
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted:
+            try:
+                current_time = self.manual_video_player.media_player.position() / 1000.0
+                team_index = team_combo.currentIndex()
+                team_name = team_combo.currentText()
+                
+                half_text = self.half_combo.currentText()
+                half_mapping = {
+                    "ครึ่งแรก": 1,
+                    "ครึ่งหลัง": 2,
+                    "ต่อเวลาครึ่งแรก": 3,
+                    "ต่อเวลาครึ่งหลัง": 4
+                }
+                half = half_mapping.get(half_text, 1)
+                
+                player_name = None
+                if player_combo.currentIndex() > 0:  # Not "ไม่ระบุ"
+                    player_name = player_combo.currentText()
+                
+                if self.manual_tracking_data:
+                    event = TrackingEvent(
+                        timestamp=current_time,
+                        event_type=event_type,
+                        team=team_name,
+                        outcome=outcome,
+                        half=half,
+                        player_name=player_name
+                    )
+                    
+                    self.manual_tracking_data.add_event(event)
+                    self.update_events_table()
+                    
+                    # Show confirmation
+                    player_info = f" โดย {player_name}" if player_name else ""
+                    QMessageBox.information(
+                        self, 
+                        "บันทึกสำเร็จ", 
+                        f"บันทึกประตูของ {team_name}{player_info}\nที่เวลา {int(current_time // 60)}:{int(current_time % 60):02d}"
+                    )
+            except Exception as e:
+                QMessageBox.warning(self, "ข้อผิดพลาด", f"ไม่สามารถบันทึกประตูได้: {str(e)}")
+        
+        # Resume video if it was playing
+        if was_playing:
+            self.manual_video_player.media_player.play()
+    
+    def add_tracking_event(self, event_type: str, outcome: Optional[str] = None):
+        """Add a tracking event at current video time"""
+        # Check if video is loaded
+        if self.manual_video_player.media_player.source().isEmpty():
+            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อนเพิ่มเหตุการณ์")
+            return
+        
+        try:
+            current_time = self.manual_video_player.media_player.position() / 1000.0  # Convert to seconds
+            team_selection = self.team_combo.currentText()
+            # Use the actual team name from combo box (which is updated with real team names)
+            # If it's "กลาง", keep it, otherwise use the selected team name directly
+            if team_selection == "กลาง":
+                team = "กลาง"
+            else:
+                # Use the team name directly from combo box (already updated with real names)
+                team = team_selection
+            
+            # Map half selection to numeric value
+            half_text = self.half_combo.currentText()
+            half_mapping = {
+                "ครึ่งแรก": 1,
+                "ครึ่งหลัง": 2,
+                "ต่อเวลาครึ่งแรก": 3,
+                "ต่อเวลาครึ่งหลัง": 4
+            }
+            half = half_mapping.get(half_text, 1)
+            
+            if self.manual_tracking_data:
+                event = TrackingEvent(
+                    timestamp=current_time,
+                    event_type=event_type,
+                    team=team,
+                    outcome=outcome,
+                    half=half
+                )
+                
+                self.manual_tracking_data.add_event(event)
+                self.update_events_table()
+        except Exception as e:
+            QMessageBox.warning(self, "ข้อผิดพลาด", f"ไม่สามารถเพิ่มเหตุการณ์ได้: {str(e)}")
+    
+    def update_events_table(self):
+        """Update the events table"""
+        if not self.manual_tracking_data:
+            return
+        
+        self.events_table.setRowCount(len(self.manual_tracking_data.events))
+        
+        for row, event in enumerate(self.manual_tracking_data.events):
+            # Time
+            time_str = f"{int(event.timestamp // 60):02d}:{int(event.timestamp % 60):02d}"
+            self.events_table.setItem(row, 0, QTableWidgetItem(time_str))
+            
+            # Event
+            self.events_table.setItem(row, 1, QTableWidgetItem(event.event_type))
+            
+            # Outcome
+            outcome_text = event.outcome if event.outcome else "-"
+            self.events_table.setItem(row, 2, QTableWidgetItem(outcome_text))
+            
+            # Team
+            self.events_table.setItem(row, 3, QTableWidgetItem(event.team))
+            
+            # Half - convert numeric to text
+            half_mapping = {
+                1: "ครึ่งแรก",
+                2: "ครึ่งหลัง",
+                3: "ต่อเวลาครึ่งแรก",
+                4: "ต่อเวลาครึ่งหลัง"
+            }
+            half_text = half_mapping.get(event.half, f"ครึ่ง {event.half}")
+            self.events_table.setItem(row, 4, QTableWidgetItem(half_text))
+            
+            # Player name
+            player_name = event.player_name if event.player_name else "-"
+            self.events_table.setItem(row, 5, QTableWidgetItem(player_name))
+            
+            # Delete button
+            delete_btn = QPushButton("ลบ")
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #f44336;
+                    color: white;
+                    padding: 5px;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #d32f2f;
+                }
+            """)
+            delete_btn.clicked.connect(lambda checked, r=row: self.delete_event_by_index(r))
+            self.events_table.setCellWidget(row, 6, delete_btn)
+    
+    def delete_selected_event(self):
+        """Delete selected event from table"""
+        current_row = self.events_table.currentRow()
+        if current_row >= 0:
+            self.delete_event_by_index(current_row)
+    
+    def delete_event_by_index(self, index: int):
+        """Delete event by index"""
+        self.manual_tracking_data.remove_event(index)
+        self.update_events_table()
+    
+    def on_event_double_clicked(self, item):
+        """Handle double-click on event to jump to video timestamp"""
+        if not item:
+            return
+        
+        row = item.row()
+        if row < 0 or not self.manual_tracking_data or row >= len(self.manual_tracking_data.events):
+            return
+        
+        # Get the event
+        event = self.manual_tracking_data.events[row]
+        
+        # Check if video is loaded
+        if self.manual_video_player.media_player.source().isEmpty():
+            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อน")
+            return
+        
+        # Convert timestamp (seconds) to milliseconds
+        timestamp_ms = int(event.timestamp * 1000)
+        
+        # Jump to the timestamp
+        self.manual_video_player.media_player.setPosition(timestamp_ms)
+        
+        # Pause the video to show the frame
+        if self.manual_video_player.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.manual_video_player.media_player.pause()
+        
+        # Highlight the row briefly
+        self.events_table.selectRow(row)
+    
+    def clear_all_events(self):
+        """Clear all events"""
+        reply = QMessageBox.question(
+            self, "ยืนยัน", "คุณแน่ใจหรือไม่ว่าต้องการลบเหตุการณ์ทั้งหมด?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.manual_tracking_data.events.clear()
+            self.update_events_table()
+    
+    def export_tracking_to_csv(self):
+        """Export tracking data to Excel with multiple sheets"""
+        if not self.manual_tracking_data or not self.manual_tracking_data.events:
+            QMessageBox.warning(self, "ไม่มีข้อมูล", "ไม่มีเหตุการณ์ที่ติดตามเพื่อส่งออก")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "ส่งออกข้อมูลการติดตาม",
+            "",
+            "Excel Files (*.xlsx);;CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                if file_path.endswith('.xlsx'):
+                    # Export to Excel with multiple sheets
+                    # Check if there are 2 teams for comparison sheet
+                    teams = sorted(set(e.team for e in self.manual_tracking_data.events if e.team != "กลาง"))
+                    has_comparison = len(teams) == 2
+                    
+                    self.manual_tracking_data.export_to_excel(file_path)
+                    
+                    sheet_info = (
+                        "ไฟล์ประกอบด้วย:\n"
+                        "- Sheet 1: ข้อมูลดิบ\n"
+                        "- Sheet 2: สรุปผลรวม (ไม่มีเปอร์เซ็นต์)\n"
+                    )
+                    if has_comparison:
+                        sheet_info += "- Sheet 3: เปรียบเทียบทีม\n"
+                        sheet_info += "- Sheet 4-7: สรุปตามครึ่ง"
+                    else:
+                        sheet_info += "- Sheet 3-6: สรุปตามครึ่ง"
+                    
+                    QMessageBox.information(
+                        self, 
+                        "สำเร็จ", 
+                        f"ส่งออกข้อมูลการติดตามไปยัง:\n{file_path}\n\n{sheet_info}"
+                    )
+                else:
+                    # Fallback to CSV
+                    self.manual_tracking_data.export_to_csv(file_path)
+                    QMessageBox.information(self, "สำเร็จ", f"ส่งออกข้อมูลการติดตามไปยัง:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(
+                    self, 
+                    "ข้อผิดพลาด", 
+                    f"ไม่สามารถส่งออกไฟล์ได้:\n{str(e)}\n\n"
+                    "กรุณาตรวจสอบว่าติดตั้ง openpyxl แล้วหรือไม่:\n"
+                    "pip install openpyxl"
+                )
+    
+    def load_video_for_manual_tracking(self):
+        """เพิ่มวิดีโอสำหรับติดตามด้วยมือ"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "เพิ่มวิดีโอสำหรับติดตามด้วยมือ",
+            "",
+            "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)"
+        )
+        
+        if file_path and os.path.exists(file_path):
+            try:
+                # Reset load attempts counter
+                self._video_load_attempts = 0
+                
+                # Load video
+                self.manual_video_player.load_video(file_path)
+                
+                # Store video path
+                if self.manual_tracking_data:
+                    self.manual_tracking_data.video_path = file_path
+                
+                # Wait a bit for media to load, then check status
+                QTimer.singleShot(500, lambda: self.check_video_loaded(file_path))
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load video:\n{str(e)}")
+    
+    def check_video_loaded(self, file_path: str):
+        """Check if video loaded successfully"""
+        try:
+            media_status = self.manual_video_player.media_player.mediaStatus()
+            # Check for loaded status
+            if media_status in [QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia]:
+                QMessageBox.information(
+                    self, 
+                    "โหลดวิดีโอสำเร็จ", 
+                    f"โหลดวิดีโอสำเร็จ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+                )
+            elif media_status == QMediaPlayer.MediaStatus.InvalidMedia:
+                QMessageBox.warning(
+                    self, 
+                    "วิดีโอไม่ถูกต้อง", 
+                    f"ไฟล์วิดีโออาจเสียหายหรือรูปแบบไม่รองรับ:\n{os.path.basename(file_path)}\n\nกรุณาลองใช้ไฟล์วิดีโออื่น"
+                )
+            else:
+                # Still loading, wait a bit more (max 5 seconds)
+                if not hasattr(self, '_video_load_attempts'):
+                    self._video_load_attempts = 0
+                self._video_load_attempts += 1
+                if self._video_load_attempts < 5:
+                    QTimer.singleShot(1000, lambda: self.check_video_loaded(file_path))
+                else:
+                    # Assume loaded after timeout
+                    QMessageBox.information(
+                        self, 
+                        "โหลดวิดีโอสำเร็จ", 
+                        f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+                    )
+                    self._video_load_attempts = 0
+        except Exception as e:
+            # If check fails, assume it's loaded
+            QMessageBox.information(
+                self, 
+                "โหลดวิดีโอสำเร็จ", 
+                f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+            )
+    
+    def show_customize_events_dialog(self):
+        """Show dialog to customize which tracking events are visible"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("ปรับแต่งปุ่มติดตาม")
+        dialog.setMinimumSize(400, 500)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QCheckBox {
+                color: #e0e0e0;
+                spacing: 8px;
+                padding: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #2b2b2b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #c41e3a;
+                border-color: #c41e3a;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        
+        title = QLabel("เลือกปุ่มที่ต้องการแสดง:")
+        title.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        instruction = QLabel("เลือกปุ่มที่ต้องการแสดงในแผงติดตาม:")
+        instruction.setStyleSheet("color: #b0b0b0; margin-bottom: 15px;")
+        layout.addWidget(instruction)
+        
+        # Select All / Clear All buttons
+        select_buttons_layout = QHBoxLayout()
+        select_all_btn = QPushButton("เลือกทั้งหมด")
+        select_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 6px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        clear_all_btn = QPushButton("เอาออกทั้งหมด")
+        clear_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                padding: 6px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        select_buttons_layout.addWidget(select_all_btn)
+        select_buttons_layout.addWidget(clear_all_btn)
+        select_buttons_layout.addStretch()
+        layout.addLayout(select_buttons_layout)
+        
+        # Scroll area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #2b2b2b;
+                border: 1px solid #555;
+                border-radius: 4px;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(5)
+        
+        # Create checkboxes for each event type
+        self.event_checkboxes = {}
+        for event_data in self.default_event_types:
+            if len(event_data) == 3:
+                event_name, color, _ = event_data
+            else:
+                event_name, color = event_data
+            checkbox = QCheckBox(event_name)
+            checkbox.setChecked(event_name in self.enabled_events)
+            checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {color};
+                    font-weight: bold;
+                }}
+            """)
+            scroll_layout.addWidget(checkbox)
+            self.event_checkboxes[event_name] = checkbox
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+        
+        # Connect select all / clear all buttons
+        def select_all():
+            for checkbox in self.event_checkboxes.values():
+                checkbox.setChecked(True)
+        
+        def clear_all():
+            for checkbox in self.event_checkboxes.values():
+                checkbox.setChecked(False)
+        
+        select_all_btn.clicked.connect(select_all)
+        clear_all_btn.clicked.connect(clear_all)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("ตกลง")
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("ยกเลิก")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Update enabled events based on checkboxes
+            self.enabled_events = {
+                event_name for event_name, checkbox in self.event_checkboxes.items()
+                if checkbox.isChecked()
+            }
+            
+            # Update button visibility
+            for event_name, btn in self.event_buttons.items():
+                btn.setVisible(event_name in self.enabled_events)
+    
+    def show_manual_tracking_help(self):
+        """Show comprehensive help dialog for manual tracking in Thai"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("คู่มือการใช้งาน Manual Tracking")
+        dialog.setMinimumSize(900, 700)
+        dialog.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1a1a2e, stop:1 #16213e);
+                color: #e0e0e0;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+            QPushButton {
+                background-color: #c41e3a;
+                color: white;
+                padding: 10px 25px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #d63347;
+            }
+            QScrollArea {
+                background-color: rgba(30, 30, 46, 0.8);
+                border: 2px solid #c41e3a;
+                border-radius: 8px;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title = QLabel("📖 คู่มือการใช้งาน Manual Tracking")
+        title.setStyleSheet("""
+            font-weight: bold;
+            font-size: 20pt;
+            color: #FFD700;
+            padding: 10px;
+            background-color: rgba(196, 30, 58, 0.3);
+            border-radius: 8px;
+            margin-bottom: 10px;
+        """)
+        layout.addWidget(title)
+        
+        # Scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: rgba(30, 30, 46, 0.5);
+                border: 2px solid #c41e3a;
+                border-radius: 8px;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 14px;
+                border-radius: 7px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c41e3a;
+                border-radius: 7px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #d63347;
+            }
+        """)
+        
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(20)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Section 1: Introduction
+        intro_section = self.create_help_section(
+            "🎯 ภาพรวมการใช้งาน",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'>
+            <b>Manual Tracking</b> เป็นระบบติดตามเหตุการณ์การแข่งขันฟุตบอลแบบมืออาชีพ 
+            ใช้ในการวิเคราะห์การแข่งขันฟุตบอล
+            </p>
+            <p style='font-size: 11pt; line-height: 1.6;'>
+            <b>ขั้นตอนการใช้งาน:</b><br>
+            1. กดปุ่ม <b style='color: #2196F3;'>เพิ่มวิดีโอ</b> เพื่อโหลดวิดีโอการแข่งขัน<br>
+            2. ตั้งชื่อทีม 1 และทีม 2 (หรือใช้ชื่อเริ่มต้น)<br>
+            3. ตั้งค่ารายชื่อผู้เล่น (ถ้าต้องการ)<br>
+            4. เลือกทีมและครึ่งที่ต้องการติดตาม<br>
+            5. เล่นวิดีโอและกดปุ่มเหตุการณ์ต่างๆ เมื่อเกิดเหตุการณ์<br>
+            6. ส่งออกข้อมูลเป็น Excel หรือ CSV เมื่อเสร็จสิ้น
+            </p>
+            """,
+            "#4CAF50"
+        )
+        content_layout.addWidget(intro_section)
+        
+        # Section 2: Attacking Actions
+        attacking_section = self.create_help_section(
+            "⚽ การโจมตี (Attacking Actions)",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการโจมตี:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #FF9800;'>ยิง</b> - บันทึกการยิงประตู
+                <ul>
+                <li><b>ประตู</b> - ยิงได้ประตู</li>
+                <li><b>ยิงเข้า</b> - ยิงเข้าเป้าแต่ไม่ได้ประตู (นับเป็นสำเร็จ)</li>
+                <li><b>ยิงออก</b> - ยิงออกนอกเป้า</li>
+                <li><b>บล็อก</b> - ถูกบล็อก</li>
+                <li><b>ถูกเซฟ</b> - ถูกผู้รักษาประตูเซฟ</li>
+                </ul>
+            </li>
+            <li><b style='color: #2196F3;'>ส่งบอล</b> - บันทึกการส่งบอล
+                <ul>
+                <li><b>สำเร็จ</b> - ส่งบอลสำเร็จ</li>
+                <li><b>ไม่สำเร็จ</b> - ส่งบอลไม่สำเร็จ</li>
+                <li><b>แอสซิสต์</b> - ส่งบอลแล้วได้ประตู</li>
+                <li><b>คีย์พาส</b> - ส่งบอลที่สร้างโอกาสยิง</li>
+                </ul>
+            </li>
+            <li><b style='color: #E91E63;'>ข้ามบอล</b> - บันทึกการข้ามบอล (ผลลัพธ์เหมือนส่งบอล)</li>
+            <li><b style='color: #9C27B0;'>ผ่านบอล</b> - บันทึกการผ่านบอล (ผลลัพธ์เหมือนส่งบอล)</li>
+            <li><b style='color: #795548;'>ส่งบอลยาว</b> - บันทึกการส่งบอลยาว (ผลลัพธ์เหมือนส่งบอล)</li>
+            <li><b style='color: #607D8B;'>ส่งบอลสั้น</b> - บันทึกการส่งบอลสั้น (สำเร็จ/ไม่สำเร็จ)</li>
+            <li><b style='color: #FF5722;'>ส่งบอลในเขตโทษ</b> - บันทึกการส่งบอลในเขตโทษ (ผลลัพธ์เหมือนส่งบอล)</li>
+            </ul>
+            """,
+            "#FF9800"
+        )
+        content_layout.addWidget(attacking_section)
+        
+        # Section 3: Set Pieces
+        setpieces_section = self.create_help_section(
+            "🎯 ลูกตั้งเตะ (Set Pieces)",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มลูกตั้งเตะ:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #00BCD4;'>เตะมุม</b> - บันทึกการเตะมุม
+                <ul>
+                <li><b>ประตู</b> - เตะมุมแล้วได้ประตู</li>
+                <li><b>ยิงเข้า</b> - เตะมุมแล้วยิงเข้าเป้า</li>
+                <li><b>ยิงออก</b> - เตะมุมแล้วยิงออก</li>
+                <li><b>แอสซิสต์</b> - เตะมุมแล้วได้ประตู</li>
+                <li><b>คีย์พาส</b> - เตะมุมแล้วสร้างโอกาสยิง</li>
+                <li><b>เคลียร์</b> - ถูกเคลียร์ออก</li>
+                </ul>
+            </li>
+            <li><b style='color: #FFC107;'>ฟรีคิก</b> - บันทึกการเตะฟรีคิก (ผลลัพธ์เหมือนเตะมุม)</li>
+            <li><b style='color: #F44336;'>ลูกโทษ</b> - บันทึกการเตะลูกโทษ
+                <ul>
+                <li><b>ประตู</b> - เตะลูกโทษได้ประตู</li>
+                <li><b>ไม่ประตู</b> - เตะลูกโทษไม่ประตู</li>
+                <li><b>ถูกเซฟ</b> - ถูกผู้รักษาประตูเซฟ</li>
+                </ul>
+            </li>
+            <li><b style='color: #607D8B;'>ทุ่มบอล</b> - บันทึกการทุ่มบอล (สำเร็จ/ไม่สำเร็จ)</li>
+            </ul>
+            """,
+            "#00BCD4"
+        )
+        content_layout.addWidget(setpieces_section)
+        
+        # Section 4: Defensive Actions
+        defensive_section = self.create_help_section(
+            "🛡️ การป้องกัน (Defensive Actions)",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการป้องกัน:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #9C27B0;'>แย่งบอล</b> - บันทึกการแย่งบอล
+                <ul>
+                <li><b>สำเร็จ</b> - แย่งบอลสำเร็จ</li>
+                <li><b>ไม่สำเร็จ</b> - แย่งบอลไม่สำเร็จ</li>
+                <li><b>ฟาวล์</b> - แย่งบอลแล้วทำฟาวล์</li>
+                </ul>
+            </li>
+            <li><b style='color: #9C27B0;'>สกัดบอล</b> - บันทึกการสกัดบอล (สำเร็จ/ไม่สำเร็จ)</li>
+            <li><b style='color: #795548;'>เคลียร์บอล</b> - บันทึกการเคลียร์บอล
+                <ul>
+                <li><b>สำเร็จ</b> - เคลียร์บอลสำเร็จ</li>
+                <li><b>ไม่สำเร็จ</b> - เคลียร์บอลไม่สำเร็จ</li>
+                <li><b>อันตราย</b> - เคลียร์บอลแบบอันตราย</li>
+                </ul>
+            </li>
+            <li><b style='color: #FF5722;'>บล็อก</b> - บันทึกการบล็อก
+                <ul>
+                <li><b>บล็อก</b> - บล็อกสำเร็จ</li>
+                <li><b>บล็อกยิง</b> - บล็อกการยิง</li>
+                </ul>
+            </li>
+            <li><b style='color: #00BCD4;'>เซฟ</b> - บันทึกการเซฟของผู้รักษาประตู
+                <ul>
+                <li><b>เซฟ</b> - เซฟสำเร็จ</li>
+                <li><b>ไม่เซฟ</b> - ไม่เซฟได้</li>
+                <li><b>เซฟสำคัญ</b> - เซฟที่สำคัญ</li>
+                </ul>
+            </li>
+            </ul>
+            """,
+            "#9C27B0"
+        )
+        content_layout.addWidget(defensive_section)
+        
+        # Section 5: Disciplinary
+        disciplinary_section = self.create_help_section(
+            "⚖️ การทำผิดกติกา (Disciplinary)",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการทำผิดกติกา:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #F44336;'>ฟาวล์</b> - บันทึกการทำฟาวล์
+                <ul>
+                <li><b>ฟาวล์</b> - ฟาวล์ธรรมดา</li>
+                <li><b>ใบเหลือง</b> - ฟาวล์แล้วได้ใบเหลือง</li>
+                <li><b>ใบแดง</b> - ฟาวล์แล้วได้ใบแดง</li>
+                </ul>
+            </li>
+            <li><b style='color: #FFEB3B;'>ใบเหลือง</b> - บันทึกการได้ใบเหลือง</li>
+            <li><b style='color: #E91E63;'>ใบแดง</b> - บันทึกการได้ใบแดง</li>
+            </ul>
+            """,
+            "#F44336"
+        )
+        content_layout.addWidget(disciplinary_section)
+        
+        # Section 6: Other Events
+        other_section = self.create_help_section(
+            "📋 เหตุการณ์อื่นๆ (Other Events)",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มเหตุการณ์อื่นๆ:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #9E9E9E;'>ออฟไซด์</b> - บันทึกการออฟไซด์</li>
+            <li><b style='color: #607D8B;'>บอลออก</b> - บันทึกการที่บอลออกนอกสนาม</li>
+            <li><b style='color: #795548;'>เปลี่ยนตัว</b> - บันทึกการเปลี่ยนตัวผู้เล่น
+                <ul>
+                <li><b>เปลี่ยนตัวเข้า</b> - ผู้เล่นเข้า</li>
+                <li><b>เปลี่ยนตัวออก</b> - ผู้เล่นออก</li>
+                </ul>
+            </li>
+            <li><b style='color: #FF9800;'>บาดเจ็บ</b> - บันทึกการบาดเจ็บ</li>
+            <li><b style='color: #F44336;'>เสียบอล</b> - บันทึกการเสียบอล</li>
+            <li><b style='color: #4CAF50;'>ครองบอล</b> - บันทึกการครองบอล</li>
+            </ul>
+            """,
+            "#607D8B"
+        )
+        content_layout.addWidget(other_section)
+        
+        # Section 7: Tips and Best Practices
+        tips_section = self.create_help_section(
+            "💡 เคล็ดลับและแนวทางปฏิบัติ",
+            """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>เคล็ดลับการใช้งาน:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b>การบันทึกเวลา:</b> วิดีโอจะหยุดอัตโนมัติเมื่อกดปุ่มเหตุการณ์ เพื่อให้บันทึกเวลาที่แม่นยำ</li>
+            <li><b>การตั้งชื่อทีม:</b> สามารถเปลี่ยนชื่อทีมได้ตลอดเวลา และจะอัพเดทในรายการเหตุการณ์ทันที</li>
+            <li><b>การตั้งค่ารายชื่อ:</b> ตั้งค่ารายชื่อผู้เล่นเพื่อให้สามารถบันทึกชื่อผู้เล่นได้เมื่อเกิดประตู</li>
+            <li><b>การลบเหตุการณ์:</b> คลิกที่เหตุการณ์ในตารางแล้วกด "ลบที่เลือก" หรือดับเบิลคลิกเพื่อไปยังเวลานั้น</li>
+            <li><b>การปรับแต่งปุ่ม:</b> ใช้ปุ่ม "ปรับแต่งปุ่ม" เพื่อเลือกปุ่มที่ต้องการแสดง</li>
+            <li><b>การส่งออก:</b> ส่งออกเป็น Excel เพื่อดูสถิติแบบละเอียด หรือ CSV สำหรับการวิเคราะห์ต่อ</li>
+            <li><b>การบันทึกประตู:</b> เมื่อเลือกผลลัพธ์ "ประตู" จะมีหน้าต่างให้กรอกชื่อผู้ยิงและรายละเอียดเพิ่มเติม</li>
+            </ul>
+            """,
+            "#FFD700"
+        )
+        content_layout.addWidget(tips_section)
+        
+        # Credits section
+        credits_section = QWidget()
+        credits_section.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(196, 30, 58, 0.4), stop:1 rgba(33, 150, 243, 0.4));
+                border: 2px solid #c41e3a;
+                border-radius: 10px;
+                padding: 20px;
+            }
+        """)
+        credits_layout = QVBoxLayout(credits_section)
+        credits_layout.setSpacing(15)
+        credits_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title with better styling
+        about_title = QLabel("👨‍💻 ผู้พัฒนา")
+        about_title.setStyleSheet("""
+            font-weight: bold;
+            font-size: 18pt;
+            color: #FFD700;
+            padding: 10px 0px;
+            background-color: rgba(255, 215, 0, 0.1);
+            border-radius: 5px;
+            border-left: 4px solid #FFD700;
+            padding-left: 10px;
+        """)
+        credits_layout.addWidget(about_title)
+        
+        # Developer info with better spacing
+        developer_name = QLabel("นายพัชระ อัลอุมารี")
+        developer_name.setStyleSheet("""
+            font-size: 15pt;
+            color: #FFFFFF;
+            font-weight: bold;
+            padding: 10px 0px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            padding-left: 10px;
+        """)
+        credits_layout.addWidget(developer_name)
+        
+        # Info container for better organization
+        info_container = QWidget()
+        info_container.setStyleSheet("""
+            QWidget {
+                background-color: rgba(30, 30, 46, 0.5);
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        info_layout = QVBoxLayout(info_container)
+        info_layout.setSpacing(8)
+        info_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Location
+        location_label = QLabel("📍 <b>ที่อยู่:</b> กรุงเทพมหานคร, ประเทศไทย")
+        location_label.setStyleSheet("""
+            font-size: 11pt;
+            color: #e0e0e0;
+            padding: 8px;
+            background-color: rgba(255, 255, 255, 0.03);
+            border-radius: 5px;
+        """)
+        location_label.setTextFormat(Qt.TextFormat.RichText)
+        info_layout.addWidget(location_label)
+        
+        # Email
+        email_label = QLabel('<a href="mailto:Patcharaalumaree@gmail.com" style="color: #2196F3; text-decoration: none;"><b>📧 อีเมล:</b> Patcharaalumaree@gmail.com</a>')
+        email_label.setOpenExternalLinks(True)
+        email_label.setTextFormat(Qt.TextFormat.RichText)
+        email_label.setStyleSheet("""
+            font-size: 11pt;
+            color: #2196F3;
+            padding: 8px;
+            background-color: rgba(33, 150, 243, 0.1);
+            border-radius: 5px;
+        """)
+        info_layout.addWidget(email_label)
+        
+        # GitHub link
+        github_link = QLabel('<a href="https://github.com/MrPatchara" style="color: #2196F3; text-decoration: none; font-weight: bold;">🔗 <b>โปรไฟล์ GitHub</b></a>')
+        github_link.setOpenExternalLinks(True)
+        github_link.setTextFormat(Qt.TextFormat.RichText)
+        github_link.setStyleSheet("""
+            font-size: 12pt;
+            color: #2196F3;
+            padding: 10px;
+            background-color: rgba(33, 150, 243, 0.15);
+            border: 1px solid rgba(33, 150, 243, 0.3);
+            border-radius: 5px;
+        """)
+        info_layout.addWidget(github_link)
+        
+        credits_layout.addWidget(info_container)
+        
+        content_layout.addWidget(credits_section)
+        
+        content_layout.addStretch()
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll)
+        
+        # Close button
+        close_btn = QPushButton("ปิด")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+    
+    def create_help_section(self, title: str, content: str, color: str) -> QWidget:
+        """Create a styled help section"""
+        section = QWidget()
+        section.setStyleSheet(f"""
+            QWidget {{
+                background-color: rgba(30, 30, 46, 0.6);
+                border-left: 4px solid {color};
+                border-radius: 5px;
+                padding: 10px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(section)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            font-weight: bold;
+            font-size: 14pt;
+            color: {color};
+            padding-bottom: 5px;
+        """)
+        layout.addWidget(title_label)
+        
+        content_label = QLabel(content)
+        content_label.setWordWrap(True)
+        content_label.setStyleSheet("""
+            font-size: 10pt;
+            color: #e0e0e0;
+            line-height: 1.6;
+        """)
+        layout.addWidget(content_label)
+        
+        return section
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")  # Modern look
+    
+    window = FreeFootballAnalysisApp()
+    window.show()
+    
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

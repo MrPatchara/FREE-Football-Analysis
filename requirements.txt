@@ -1,0 +1,13 @@
+python-dotenv==0.21.0
+ultralytics==8.2.31
+roboflow==1.1.32
+opencv-python==4.10.0.82
+supervision==0.21.0
+numpy==1.26.4
+scikit-learn==1.5.0
+torch==2.3.1
+pandas==2.2.2
+openpyxl==3.1.2
+PyQt6==6.7.1
+scipy==1.13.1
+matplotlib==3.8.4
