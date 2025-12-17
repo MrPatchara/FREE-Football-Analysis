@@ -41,6 +41,7 @@ except ImportError:
     class TrackingEvent:
         pass
 from frontend.manual_tracking import ManualTrackingData, TrackingEvent
+from frontend.translations import get_translation_manager, t
 
 
 class VideoProcessingThread(QThread):
@@ -59,17 +60,19 @@ class VideoProcessingThread(QThread):
     
     def run(self):
         try:
-            self.progress.emit("กำลังประมวลผลวิดีโอ...")
+            from frontend.translations import t
+            self.progress.emit(t("กำลังประมวลผลวิดีโอ...", "กำลังประมวลผลวิดีโอ..."))
             # Reset logs before processing
             self.reset_logs()
             # Read video frames first to get dimensions
             from utils import read_video
             self.frames, self.fps, _, _ = read_video(self.video_path, self.verbose)
             output_path, self.tracks = process_video(self.video_path, self.classes, self.verbose, return_tracks=True)
-            self.progress.emit("ประมวลผลเสร็จสิ้น!")
+            self.progress.emit(t("ประมวลผลเสร็จสิ้น!", "ประมวลผลเสร็จสิ้น!"))
             self.finished.emit(True, output_path)
         except Exception as e:
-            self.progress.emit(f"เกิดข้อผิดพลาด: {str(e)}")
+            from frontend.translations import t
+            self.progress.emit(f"{t('เกิดข้อผิดพลาด:', 'เกิดข้อผิดพลาด:')} {str(e)}")
             self.finished.emit(False, "")
     
     def reset_logs(self):
@@ -175,8 +178,10 @@ class VideoPlayerWidget(QWidget):
         self.seek_slider.setRange(0, 0)
         
         # Speed control - smaller
-        speed_label = QLabel("ความเร็ว:")
-        speed_label.setStyleSheet("color: #e0e0e0; font-size: 8pt;")
+        from frontend.translations import t
+        speed_label_text = t("ความเร็ว:", "Speed:")
+        self.speed_label = QLabel(speed_label_text)
+        self.speed_label.setStyleSheet("color: #e0e0e0; font-size: 8pt;")
         self.speed_combo = QComboBox()
         self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
         self.speed_combo.setCurrentIndex(3)  # Default 1.0x
@@ -208,7 +213,7 @@ class VideoPlayerWidget(QWidget):
         controls_layout.addWidget(self.play_pause_btn)
         controls_layout.addWidget(self.time_label)
         controls_layout.addWidget(self.seek_slider, 1)
-        controls_layout.addWidget(speed_label)
+        controls_layout.addWidget(self.speed_label)
         controls_layout.addWidget(self.speed_combo)
         
         layout.addWidget(controls_frame)
@@ -576,10 +581,16 @@ class FreeFootballAnalysisApp(QMainWindow):
         self.log_refresh_timer.timeout.connect(self.auto_refresh_logs)
         self.current_log_path = None  # Track currently displayed log file
         
+        # Initialize translation manager
+        self.translation_manager = get_translation_manager()
+        
+        # Store UI elements for translation refresh
+        self.ui_elements_to_translate = {}
+        
         self.init_ui()
     
     def init_ui(self):
-        self.setWindowTitle("FREE - Football Analysis")
+        self.setWindowTitle(t("FREE - Football Analysis", "FREE - Football Analysis"))
         # Make window responsive - use percentage-based sizing
         self.setMinimumSize(1000, 600)
         
@@ -693,9 +704,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(line3)
         
         # Start Analysis button
-        self.btn_start = QPushButton("เริ่มวิเคราะห์ (Start Analysis)")
+        start_text = t("เริ่มวิเคราะห์ (Start Analysis)", "เริ่มวิเคราะห์ (Start Analysis)")
+        self.btn_start = QPushButton(start_text)
         self.btn_start.clicked.connect(self.start_analysis)
         self.btn_start.setEnabled(False)
+        self.ui_elements_to_translate[self.btn_start] = "เริ่มวิเคราะห์ (Start Analysis)"
         layout.addWidget(self.btn_start)
         
         # Progress bar
@@ -738,26 +751,26 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Mode selection
         mode_tab = self.create_mode_selection_tab()
-        tabs.addTab(mode_tab, "Info")
+        tabs.addTab(mode_tab, t("Info", "Info"))
         
         # AI YOLO Mode tabs
         usage_tab = self.create_usage_tab()
-        tabs.addTab(usage_tab, "AI - Tracking")
+        tabs.addTab(usage_tab, t("AI - Tracking", "AI - Tracking"))
         
         results_tab = self.create_results_tab()
-        tabs.addTab(results_tab, "Video Preview")
+        tabs.addTab(results_tab, t("Video Preview", "Video Preview"))
         
         # AI Results tab (Heat Maps)
         ai_results_tab = self.create_ai_results_tab()
-        tabs.addTab(ai_results_tab, "AI - Results")
+        tabs.addTab(ai_results_tab, t("AI - Results", "AI - Results"))
         
         # Manual Tracking tab
         manual_tracking_tab = self.create_manual_tracking_tab()
-        tabs.addTab(manual_tracking_tab, "Manual Tracking")
+        tabs.addTab(manual_tracking_tab, t("Manual Tracking", "Manual Tracking"))
         
         # Logs tab
         logs_tab = self.create_logs_tab()
-        tabs.addTab(logs_tab, "Logs")
+        tabs.addTab(logs_tab, t("Logs", "Logs"))
         
         self.tabs = tabs
         return tabs
@@ -774,7 +787,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         top_row.setSpacing(20)
         
         # Options group - left side
-        options_group = QGroupBox("ตัวเลือกการแสดงผล")
+        options_group_text = t("ตัวเลือกการแสดงผล", "Display Options")
+        options_group = QGroupBox(options_group_text)
+        self.ui_elements_to_translate[options_group] = "ตัวเลือกการแสดงผล"
         options_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -820,33 +835,45 @@ class FreeFootballAnalysisApp(QMainWindow):
             }
         """
         
-        self.checkbox_players = QCheckBox("Track ผู้เล่น")
+        checkbox_players_text = t("Track ผู้เล่น", "Track Players")
+        self.checkbox_players = QCheckBox(checkbox_players_text)
         self.checkbox_players.setChecked(True)
         self.checkbox_players.setStyleSheet(checkbox_style)
+        self.ui_elements_to_translate[self.checkbox_players] = "Track ผู้เล่น"
         options_layout.addWidget(self.checkbox_players)
         
-        self.checkbox_goalkeepers = QCheckBox("Track ผู้รักษาประตู")
+        checkbox_goalkeepers_text = t("Track ผู้รักษาประตู", "Track Goalkeepers")
+        self.checkbox_goalkeepers = QCheckBox(checkbox_goalkeepers_text)
         self.checkbox_goalkeepers.setChecked(True)
         self.checkbox_goalkeepers.setStyleSheet(checkbox_style)
+        self.ui_elements_to_translate[self.checkbox_goalkeepers] = "Track ผู้รักษาประตู"
         options_layout.addWidget(self.checkbox_goalkeepers)
         
-        self.checkbox_referees = QCheckBox("Track ผู้ตัดสิน")
+        checkbox_referees_text = t("Track ผู้ตัดสิน", "Track Referees")
+        self.checkbox_referees = QCheckBox(checkbox_referees_text)
         self.checkbox_referees.setChecked(True)
         self.checkbox_referees.setStyleSheet(checkbox_style)
+        self.ui_elements_to_translate[self.checkbox_referees] = "Track ผู้ตัดสิน"
         options_layout.addWidget(self.checkbox_referees)
         
-        self.checkbox_ball = QCheckBox("Track ลูกบอล")
+        checkbox_ball_text = t("Track ลูกบอล", "Track Ball")
+        self.checkbox_ball = QCheckBox(checkbox_ball_text)
         self.checkbox_ball.setChecked(True)
         self.checkbox_ball.setStyleSheet(checkbox_style)
+        self.ui_elements_to_translate[self.checkbox_ball] = "Track ลูกบอล"
         options_layout.addWidget(self.checkbox_ball)
         
-        self.checkbox_stats = QCheckBox("แสดงสถิติ")
+        checkbox_stats_text = t("แสดงสถิติ", "Show Statistics")
+        self.checkbox_stats = QCheckBox(checkbox_stats_text)
         self.checkbox_stats.setChecked(True)
         self.checkbox_stats.setStyleSheet(checkbox_style)
+        self.ui_elements_to_translate[self.checkbox_stats] = "แสดงสถิติ"
         options_layout.addWidget(self.checkbox_stats)
         
         # Add warning/info label
-        info_label = QLabel("💡 หมายเหตุ: ตัวเลือกข้างต้นใช้สำหรับการแสดงผลในวิดีโอเท่านั้น ไม่ส่งผลต่อการวิเคราะห์ผลด้าน ImageProcessing ของ AI")
+        info_label_text = t("💡 หมายเหตุ: ตัวเลือกข้างต้นใช้สำหรับการแสดงผลในวิดีโอเท่านั้น ไม่ส่งผลต่อการวิเคราะห์ผลด้าน ImageProcessing ของ AI", "💡 Note: The above options are for video display only and do not affect AI ImageProcessing analysis results")
+        info_label = QLabel(info_label_text)
+        self.ui_elements_to_translate[info_label] = "💡 หมายเหตุ: ตัวเลือกข้างต้นใช้สำหรับการแสดงผลในวิดีโอเท่านั้น ไม่ส่งผลต่อการวิเคราะห์ผลด้าน ImageProcessing ของ AI"
         info_label.setStyleSheet("""
             QLabel {
                 font-size: 9.5pt;
@@ -868,18 +895,24 @@ class FreeFootballAnalysisApp(QMainWindow):
         top_row.addWidget(options_group, 1)  # Stretch factor 1
         
         # Video Source section - right side
-        source_group = QGroupBox("แหล่งวิดีโอ")
+        source_group_text = t("แหล่งวิดีโอ", "Video Source")
+        source_group = QGroupBox(source_group_text)
+        self.ui_elements_to_translate[source_group] = "แหล่งวิดีโอ"
         source_group.setStyleSheet(options_group.styleSheet())
         source_layout = QVBoxLayout()
         source_layout.setContentsMargins(15, 10, 15, 10)
         source_layout.setSpacing(14)
         
         # Demo section
-        demo_label = QLabel("ตัวอย่าง")
+        demo_text = t("ตัวอย่าง", "Demo")
+        demo_label = QLabel(demo_text)
         demo_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-top: 5px;")
+        self.ui_elements_to_translate[demo_label] = "ตัวอย่าง"
         source_layout.addWidget(demo_label)
         
-        demo_instruction = QLabel("เลือกวิดีโอตัวอย่างจาก 2 วิดีโอ")
+        demo_inst_text = t("เลือกวิดีโอตัวอย่างจาก 2 วิดีโอ", "Select demo video from 2 videos")
+        demo_instruction = QLabel(demo_inst_text)
+        self.ui_elements_to_translate[demo_instruction] = "เลือกวิดีโอตัวอย่างจาก 2 วิดีโอ"
         demo_instruction.setStyleSheet("color: #b0b0b0; font-size: 10pt; margin-bottom: 8px;")
         source_layout.addWidget(demo_instruction)
         
@@ -906,9 +939,13 @@ class FreeFootballAnalysisApp(QMainWindow):
                 border-color: #c41e3a;
             }
         """
-        self.radio_demo1 = QRadioButton("ตัวอย่าง 1")
+        demo1_text = t("ตัวอย่าง 1", "Demo 1")
+        self.radio_demo1 = QRadioButton(demo1_text)
+        self.ui_elements_to_translate[self.radio_demo1] = "ตัวอย่าง 1"
         self.radio_demo1.setStyleSheet(radio_style)
-        self.radio_demo2 = QRadioButton("ตัวอย่าง 2")
+        demo2_text = t("ตัวอย่าง 2", "Demo 2")
+        self.radio_demo2 = QRadioButton(demo2_text)
+        self.ui_elements_to_translate[self.radio_demo2] = "ตัวอย่าง 2"
         self.radio_demo2.setStyleSheet(radio_style)
         self.radio_demo1.setChecked(False)
         self.radio_demo2.setChecked(False)
@@ -933,11 +970,15 @@ class FreeFootballAnalysisApp(QMainWindow):
         source_layout.addWidget(line2)
         
         # Upload section
-        upload_label = QLabel("อัปโหลดวิดีโอ")
+        upload_text = t("อัปโหลดวิดีโอ", "Upload Video")
+        upload_label = QLabel(upload_text)
         upload_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-top: 5px;")
+        self.ui_elements_to_translate[upload_label] = "อัปโหลดวิดีโอ"
         source_layout.addWidget(upload_label)
         
-        self.btn_browse = QPushButton("เลือกไฟล์วิดีโอ")
+        browse_text = t("เลือกไฟล์วิดีโอ", "Select Video File")
+        self.btn_browse = QPushButton(browse_text)
+        self.ui_elements_to_translate[self.btn_browse] = "เลือกไฟล์วิดีโอ"
         self.btn_browse.clicked.connect(self.browse_video)
         self.btn_browse.setMinimumHeight(40)
         self.btn_browse.setStyleSheet("""
@@ -981,7 +1022,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addSpacing(10)
         
         # Start Analysis button - moved from sidebar
-        self.btn_start = QPushButton("เริ่มวิเคราะห์")
+        start_text2 = t("เริ่มวิเคราะห์", "Start Analysis")
+        self.btn_start = QPushButton(start_text2)
+        self.ui_elements_to_translate[self.btn_start] = "เริ่มวิเคราะห์"
         self.btn_start.clicked.connect(self.start_analysis)
         self.btn_start.setEnabled(False)
         self.btn_start.setMinimumHeight(55)
@@ -1042,7 +1085,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        title = QLabel("Video Preview")
+        title_text = t("Video Preview", "Video Preview")
+        title = QLabel(title_text)
+        self.ui_elements_to_translate[title] = "Video Preview"
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
@@ -1053,16 +1098,25 @@ class FreeFootballAnalysisApp(QMainWindow):
         # Video player widget
         self.result_video_player = VideoPlayerWidget()
         self.result_video_player.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Store reference to speed label for translation
+        if hasattr(self.result_video_player, 'speed_label'):
+            self.ui_elements_to_translate[self.result_video_player.speed_label] = "ความเร็ว:"
         layout.addWidget(self.result_video_player, 1)
         
         # Buttons for video control
         button_layout = QHBoxLayout()
         
-        self.btn_open_output = QPushButton("เปิดวีดีโอ")
+        open_video_text = t("เปิดวีดีโอ", "Open Video")
+        self.btn_open_output = QPushButton(open_video_text)
+        # Store with Thai text as key, but we'll use the default parameter in translate
+        self.ui_elements_to_translate[self.btn_open_output] = ("เปิดวีดีโอ", "Open Video")
         self.btn_open_output.clicked.connect(self.open_video_file)
         button_layout.addWidget(self.btn_open_output)
         
-        self.btn_open_folder = QPushButton("เปิดโฟลเดอร์ผลลัพธ์")
+        open_folder_text = t("เปิดโฟลเดอร์ผลลัพธ์", "Open Output Folder")
+        self.btn_open_folder = QPushButton(open_folder_text)
+        # Store with Thai text as key, but we'll use the default parameter in translate
+        self.ui_elements_to_translate[self.btn_open_folder] = ("เปิดโฟลเดอร์ผลลัพธ์", "Open Output Folder")
         self.btn_open_folder.clicked.connect(self.open_output_folder)
         button_layout.addWidget(self.btn_open_folder)
         
@@ -1107,23 +1161,38 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Heat Map tab (existing functionality)
         heat_map_tab = self.create_heat_map_subtab()
-        sub_tabs.addTab(heat_map_tab, "Heat Map")
+        heat_map_tab_name = t("Heat Map", "Heat Map")
+        sub_tabs.addTab(heat_map_tab, heat_map_tab_name)
+        if not hasattr(self, 'ai_results_subtabs'):
+            self.ai_results_subtabs = {}
+        self.ai_results_subtabs[0] = ("Heat Map", heat_map_tab_name)
         
         # Statistics tab (new - coming soon)
         statistics_tab = self.create_statistics_subtab()
-        sub_tabs.addTab(statistics_tab, "Statistics")
+        statistics_tab_name = t("Statistics", "Statistics")
+        sub_tabs.addTab(statistics_tab, statistics_tab_name)
+        self.ai_results_subtabs[1] = ("Statistics", statistics_tab_name)
         
         # Movement Analysis tab (new - coming soon)
         movement_tab = self.create_movement_analysis_subtab()
-        sub_tabs.addTab(movement_tab, "Movement Analysis")
+        movement_tab_name = t("Movement Analysis", "Movement Analysis")
+        sub_tabs.addTab(movement_tab, movement_tab_name)
+        self.ai_results_subtabs[2] = ("Movement Analysis", movement_tab_name)
         
         # Pass Analysis tab (new - coming soon)
         pass_analysis_tab = self.create_pass_analysis_subtab()
-        sub_tabs.addTab(pass_analysis_tab, "Pass Analysis")
+        pass_analysis_tab_name = t("Pass Analysis", "Pass Analysis")
+        sub_tabs.addTab(pass_analysis_tab, pass_analysis_tab_name)
+        self.ai_results_subtabs[3] = ("Pass Analysis", pass_analysis_tab_name)
         
         # Zone Analysis tab (new - coming soon)
         zone_analysis_tab = self.create_zone_analysis_subtab()
-        sub_tabs.addTab(zone_analysis_tab, "Zone Analysis")
+        zone_analysis_tab_name = t("Zone Analysis", "Zone Analysis")
+        sub_tabs.addTab(zone_analysis_tab, zone_analysis_tab_name)
+        self.ai_results_subtabs[4] = ("Zone Analysis", zone_analysis_tab_name)
+        
+        # Store sub_tabs reference for refresh
+        self.ai_results_subtabs_widget = sub_tabs
         
         layout.addWidget(sub_tabs)
         
@@ -1138,12 +1207,16 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setSpacing(15)
         
         # Info label
-        info_label = QLabel("Heat Maps จะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        heat_maps_info_text = t("Heat Maps จะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Heat Maps will be displayed after analyzing video")
+        info_label = QLabel(heat_maps_info_text)
+        self.ui_elements_to_translate[info_label] = ("Heat Maps จะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Heat Maps will be displayed after analyzing video")
         info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
         layout.addWidget(info_label)
         
         # Heat map type selector
-        heat_map_group = QGroupBox("เลือกประเภท Heat Map")
+        heat_map_group_text = t("เลือกประเภท Heat Map", "Select Heat Map Type")
+        heat_map_group = QGroupBox(heat_map_group_text)
+        self.ui_elements_to_translate[heat_map_group] = ("เลือกประเภท Heat Map", "Select Heat Map Type")
         heat_map_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -1163,10 +1236,18 @@ class FreeFootballAnalysisApp(QMainWindow):
         heat_map_layout = QHBoxLayout()
         
         self.heat_map_radio_group = QButtonGroup()
-        self.radio_all_players = QRadioButton("ผู้เล่นทั้งหมด")
-        self.radio_team1 = QRadioButton("ทีม 1")
-        self.radio_team2 = QRadioButton("ทีม 2")
-        self.radio_ball = QRadioButton("ลูกบอล")
+        all_players_text = t("ผู้เล่นทั้งหมด", "All Players")
+        self.radio_all_players = QRadioButton(all_players_text)
+        self.ui_elements_to_translate[self.radio_all_players] = "ผู้เล่นทั้งหมด"
+        team1_text = t("ทีม 1", "Team 1")
+        self.radio_team1 = QRadioButton(team1_text)
+        self.ui_elements_to_translate[self.radio_team1] = "ทีม 1"
+        team2_text = t("ทีม 2", "Team 2")
+        self.radio_team2 = QRadioButton(team2_text)
+        self.ui_elements_to_translate[self.radio_team2] = "ทีม 2"
+        ball_text = t("ลูกบอล", "Ball")
+        self.radio_ball = QRadioButton(ball_text)
+        self.ui_elements_to_translate[self.radio_ball] = "ลูกบอล"
         
         self.heat_map_radio_group.addButton(self.radio_all_players, 0)
         self.heat_map_radio_group.addButton(self.radio_team1, 1)
@@ -1236,7 +1317,16 @@ class FreeFootballAnalysisApp(QMainWindow):
                 border-radius: 4px;
             }
         """)
-        self.heat_map_label.setText("ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        no_heat_map_text_th = "ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน"
+        no_heat_map_text_en = "No Heat Map data yet\nPlease analyze video first"
+        current_lang = self.translation_manager.get_language()
+        no_heat_map_text = no_heat_map_text_en if current_lang == "EN" else no_heat_map_text_th
+        self.heat_map_label.setText(no_heat_map_text)
+        if not hasattr(self, 'heat_map_label_text'):
+            self.heat_map_label_text = (no_heat_map_text_th, no_heat_map_text_en)
+        # Store for translation refresh
+        if hasattr(self, 'ui_elements_to_translate'):
+            self.ui_elements_to_translate[self.heat_map_label] = self.heat_map_label_text
         self.heat_map_label.setStyleSheet("""
             QLabel {
                 background-color: #2b2b2b;
@@ -1254,7 +1344,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        self.btn_save_heat_map = QPushButton("บันทึก Heat Map เป็น PNG")
+        save_heat_map_text = t("บันทึก Heat Map เป็น PNG", "Save Heat Map as PNG")
+        self.btn_save_heat_map = QPushButton(save_heat_map_text)
+        self.ui_elements_to_translate[self.btn_save_heat_map] = ("บันทึก Heat Map เป็น PNG", "Save Heat Map as PNG")
         self.btn_save_heat_map.clicked.connect(self.save_heat_map)
         self.btn_save_heat_map.setEnabled(False)  # Disabled until heat map is generated
         self.btn_save_heat_map.setMinimumHeight(40)
@@ -1290,7 +1382,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setSpacing(15)
         
         # Title
-        title = QLabel("Statistics")
+        title_text = t("Statistics", "Statistics")
+        title = QLabel(title_text)
+        self.ui_elements_to_translate[title] = ("Statistics", "Statistics")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -1299,7 +1393,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(title)
         
         # Info label
-        info_label = QLabel("สถิติจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        stats_info_text = t("สถิติจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Statistics will be displayed after analyzing video")
+        info_label = QLabel(stats_info_text)
+        self.ui_elements_to_translate[info_label] = ("สถิติจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Statistics will be displayed after analyzing video")
         info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
         layout.addWidget(info_label)
         
@@ -1331,7 +1427,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         scroll_layout.setSpacing(15)
         
         # Team statistics section
-        self.team_stats_group = QGroupBox("Team Statistics")
+        team_stats_text = t("Team Statistics", "Team Statistics")
+        self.team_stats_group = QGroupBox(team_stats_text)
+        self.ui_elements_to_translate[self.team_stats_group] = ("Team Statistics", "Team Statistics")
         self.team_stats_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -1354,7 +1452,13 @@ class FreeFootballAnalysisApp(QMainWindow):
         scroll_layout.addWidget(self.team_stats_group)
         
         # Placeholder when no data
-        self.stats_placeholder = QLabel("ยังไม่มีข้อมูลสถิติ\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        no_stats_text = t("ยังไม่มีข้อมูลสถิติ\nกรุณากดวิเคราะห์วิดีโอก่อน", "No statistics data yet\nPlease analyze video first")
+        self.stats_placeholder = QLabel(no_stats_text)
+        if not hasattr(self, 'stats_placeholder_text'):
+            self.stats_placeholder_text = ("ยังไม่มีข้อมูลสถิติ\nกรุณากดวิเคราะห์วิดีโอก่อน", "No statistics data yet\nPlease analyze video first")
+        # Store for translation refresh
+        if hasattr(self, 'ui_elements_to_translate'):
+            self.ui_elements_to_translate[self.stats_placeholder] = self.stats_placeholder_text
         self.stats_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stats_placeholder.setStyleSheet("""
             QLabel {
@@ -1396,7 +1500,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         if not players_data or len(players_data) == 0:
             print("[DEBUG] No players data")
             if hasattr(self, 'stats_placeholder'):
-                self.stats_placeholder.setText("ยังไม่มีข้อมูลผู้เล่น\nกรุณากดวิเคราะห์วิดีโอก่อน")
+                self.stats_placeholder.setText(t("ยังไม่มีข้อมูลผู้เล่น\nกรุณากดวิเคราะห์วิดีโอก่อน", "No player data yet\nPlease analyze video first"))
                 self.stats_placeholder.setVisible(True)
             if hasattr(self, 'team_stats_group'):
                 self.team_stats_group.setVisible(False)
@@ -1891,7 +1995,8 @@ class FreeFootballAnalysisApp(QMainWindow):
                 image_layout.addWidget(player_label)
             else:
                 # Placeholder if no image
-                placeholder_label = QLabel("No Image")
+                no_image_text = t("ไม่มีรูปภาพ", "No Image")
+                placeholder_label = QLabel(no_image_text)
                 placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 placeholder_label.setStyleSheet("""
                     QLabel {
@@ -1909,7 +2014,8 @@ class FreeFootballAnalysisApp(QMainWindow):
             stats_layout = QVBoxLayout(stats_container)
             
             # Team title
-            team_title = QLabel(f"Team {team_id}")
+            team_title_text = t(f"ทีม {team_id}", f"Team {team_id}")
+            team_title = QLabel(team_title_text)
             team_title.setStyleSheet("""
                 QLabel {
                     color: #c41e3a;
@@ -1921,7 +2027,8 @@ class FreeFootballAnalysisApp(QMainWindow):
             stats_layout.addWidget(team_title)
             
             # Ball Possession (main stat)
-            possession_label = QLabel(f"Ball Possession: {team_data['ball_possession_percent']:.1f}%")
+            possession_text = t("ครองบอล:", "Ball Possession:")
+            possession_label = QLabel(f"{possession_text} {team_data['ball_possession_percent']:.1f}%")
             possession_label.setStyleSheet("""
                 QLabel {
                     color: #4CAF50;
@@ -1936,12 +2043,19 @@ class FreeFootballAnalysisApp(QMainWindow):
             team_layout.addWidget(possession_label)
             
             # Other statistics
+            possession_time_text = t("เวลาครองบอล:", "Possession Time:")
+            possession_frames_text = t("เฟรมครองบอล:", "Possession Frames:")
+            total_touches_text = t("การสัมผัสบอลทั้งหมด:", "Total Touches:")
+            players_detected_text = t("จำนวนผู้เล่นที่ตรวจจับได้:", "Players Detected:")
+            active_frames_text = t("เฟรมที่ใช้งาน:", "Active Frames:")
+            minutes_text = t("นาที", "minutes")
+            frames_text = t("เฟรม", "frames")
             stats_text = (
-                f"Possession Time: {team_data['ball_possession_time_minutes']:.1f} minutes\n"
-                f"Possession Frames: {team_data['ball_possession_frames']} frames\n"
-                f"Total Touches: {team_data['total_touches']}\n"
-                f"Players Detected: {team_data['total_players']}\n"
-                f"Active Frames: {team_data['active_frames']}"
+                f"{possession_time_text} {team_data['ball_possession_time_minutes']:.1f} {minutes_text}\n"
+                f"{possession_frames_text} {team_data['ball_possession_frames']} {frames_text}\n"
+                f"{total_touches_text} {team_data['total_touches']}\n"
+                f"{players_detected_text} {team_data['total_players']}\n"
+                f"{active_frames_text} {team_data['active_frames']}"
             )
             
             stats_label = QLabel(stats_text)
@@ -1974,7 +2088,8 @@ class FreeFootballAnalysisApp(QMainWindow):
             """)
             overall_layout = QVBoxLayout(overall_frame)
             
-            overall_title = QLabel("Overall Statistics")
+            overall_title_text = t("สถิติรวม", "Overall Statistics")
+            overall_title = QLabel(overall_title_text)
             overall_title.setStyleSheet("""
                 QLabel {
                     color: #c41e3a;
@@ -1985,12 +2100,16 @@ class FreeFootballAnalysisApp(QMainWindow):
             """)
             overall_layout.addWidget(overall_title)
             
+            total_frames_text = t("เฟรมทั้งหมด:", "Total Frames:")
+            video_duration_text = t("ระยะเวลาวิดีโอ:", "Video Duration:")
+            team_players_text = t("ผู้เล่น", "Players")
+            total_possession_frames_text = t("เฟรมครองบอลทั้งหมด:", "Total Possession Frames:")
             overall_text = (
-                f"Total Frames: {overall_data.get('total_frames', 0)}\n"
-                f"Video Duration: {overall_data.get('video_duration_minutes', 0):.1f} minutes\n"
-                f"Team 1 Players: {overall_data.get('total_players_team1', 0)}\n"
-                f"Team 2 Players: {overall_data.get('total_players_team2', 0)}\n"
-                f"Total Possession Frames: {overall_data.get('total_ball_possession_frames', 0)}"
+                f"{total_frames_text} {overall_data.get('total_frames', 0)}\n"
+                f"{video_duration_text} {overall_data.get('video_duration_minutes', 0):.1f} {minutes_text}\n"
+                f"{t('ทีม 1', 'Team 1')} {team_players_text}: {overall_data.get('total_players_team1', 0)}\n"
+                f"{t('ทีม 2', 'Team 2')} {team_players_text}: {overall_data.get('total_players_team2', 0)}\n"
+                f"{total_possession_frames_text} {overall_data.get('total_ball_possession_frames', 0)}"
             )
             
             overall_label = QLabel(overall_text)
@@ -2019,7 +2138,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setSpacing(15)
         
         # Info label
-        info_label = QLabel("วิเคราะห์การเคลื่อนไหวจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ")
+        movement_info_text = t("วิเคราะห์การเคลื่อนไหวจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Movement analysis will be displayed after analyzing video")
+        info_label = QLabel(movement_info_text)
+        self.ui_elements_to_translate[info_label] = ("วิเคราะห์การเคลื่อนไหวจะแสดงผลหลังจากกดวิเคราะห์วิดีโอ", "Movement analysis will be displayed after analyzing video")
         info_label.setStyleSheet("color: #b0b0b0; font-size: 11pt; margin-bottom: 10px;")
         layout.addWidget(info_label)
         
@@ -2035,14 +2156,22 @@ class FreeFootballAnalysisApp(QMainWindow):
             }
         """)
         warning_layout = QVBoxLayout(warning_frame)
-        warning_label = QLabel(
-            "⚠️ หมายเหตุเกี่ยวกับความแม่นยำ:\n"
-            "• หน่วย px/s = pixels per second (พิกเซลต่อวินาที)\n"
-            "• ไม่สามารถแปลงเป็น m/s ได้โดยไม่มี field calibration\n"
-            "• ข้อมูลนี้มาจาก AI tracking ซึ่งมีความแม่นยำประมาณ 90-95%\n"
-            "• ความเร็วและระยะทางเป็นค่าสัมพัทธ์สำหรับเปรียบเทียบ\n"
-            "• ใช้สำหรับวิเคราะห์รูปแบบการเล่นและการเปรียบเทียบระหว่างผู้เล่น"
+        # Define warning text in both languages
+        warning_full_text_th = (
+            "⚠️ หมายเหตุเกี่ยวกับความแม่นยำ:\n• หน่วย px/s = pixels per second (พิกเซลต่อวินาที)\n• ไม่สามารถแปลงเป็น m/s ได้โดยไม่มี field calibration\n• ข้อมูลนี้มาจาก AI tracking ซึ่งมีความแม่นยำประมาณ 90-95%\n• ความเร็วและระยะทางเป็นค่าสัมพัทธ์สำหรับเปรียบเทียบ\n• ใช้สำหรับวิเคราะห์รูปแบบการเล่นและการเปรียบเทียบระหว่างผู้เล่น"
         )
+        warning_full_text_en = (
+            "⚠️ Note about accuracy:\n• Unit px/s = pixels per second\n• Cannot convert to m/s without field calibration\n• This data comes from AI tracking with approximately 90-95% accuracy\n• Speed and distance are relative values for comparison\n• Used for analyzing playing patterns and comparing between players"
+        )
+        # Use current language to set initial text - check language directly
+        current_lang = self.translation_manager.get_language()
+        if current_lang == "EN":
+            warning_text = warning_full_text_en
+        else:
+            warning_text = warning_full_text_th
+        warning_label = QLabel(warning_text)
+        # Store both languages for refresh
+        self.ui_elements_to_translate[warning_label] = (warning_full_text_th, warning_full_text_en)
         warning_label.setStyleSheet("color: #ffcc00; font-size: 9pt;")
         warning_label.setWordWrap(True)
         warning_layout.addWidget(warning_label)
@@ -2052,7 +2181,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         controls_layout = QHBoxLayout()
         
         # Analysis type selector
-        analysis_group = QGroupBox("ประเภทการวิเคราะห์")
+        analysis_group_text = t("ประเภทการวิเคราะห์", "Analysis Type")
+        analysis_group = QGroupBox(analysis_group_text)
+        self.ui_elements_to_translate[analysis_group] = ("ประเภทการวิเคราะห์", "Analysis Type")
         analysis_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -2072,10 +2203,18 @@ class FreeFootballAnalysisApp(QMainWindow):
         analysis_layout = QVBoxLayout()
         
         self.movement_analysis_radio_group = QButtonGroup()
-        self.radio_movement_paths = QRadioButton("เส้นทางการเคลื่อนที่")
-        self.radio_speed_zones = QRadioButton("Speed Zones (พื้นที่ความเร็วสูง)")
-        self.radio_speed_chart = QRadioButton("กราฟความเร็ว")
-        self.radio_movement_stats = QRadioButton("สถิติการเคลื่อนไหว")
+        movement_paths_text = t("เส้นทางการเคลื่อนที่", "Movement Paths")
+        self.radio_movement_paths = QRadioButton(movement_paths_text)
+        self.ui_elements_to_translate[self.radio_movement_paths] = ("เส้นทางการเคลื่อนที่", "Movement Paths")
+        speed_zones_text = t("Speed Zones (พื้นที่ความเร็วสูง)", "Speed Zones (High Speed Areas)")
+        self.radio_speed_zones = QRadioButton(speed_zones_text)
+        self.ui_elements_to_translate[self.radio_speed_zones] = ("Speed Zones (พื้นที่ความเร็วสูง)", "Speed Zones (High Speed Areas)")
+        speed_chart_text = t("กราฟความเร็ว", "Speed Chart")
+        self.radio_speed_chart = QRadioButton(speed_chart_text)
+        self.ui_elements_to_translate[self.radio_speed_chart] = ("กราฟความเร็ว", "Speed Chart")
+        movement_stats_text = t("สถิติการเคลื่อนไหว", "Movement Statistics")
+        self.radio_movement_stats = QRadioButton(movement_stats_text)
+        self.ui_elements_to_translate[self.radio_movement_stats] = ("สถิติการเคลื่อนไหว", "Movement Statistics")
         
         self.movement_analysis_radio_group.addButton(self.radio_movement_paths, 0)
         self.movement_analysis_radio_group.addButton(self.radio_speed_zones, 1)
@@ -2114,7 +2253,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         analysis_group.setLayout(analysis_layout)
         
         # Team/Player selector
-        selector_group = QGroupBox("เลือกทีม/ผู้เล่น")
+        selector_group_text = t("เลือกทีม/ผู้เล่น", "Select Team/Player")
+        selector_group = QGroupBox(selector_group_text)
+        self.ui_elements_to_translate[selector_group] = ("เลือกทีม/ผู้เล่น", "Select Team/Player")
         selector_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -2134,9 +2275,15 @@ class FreeFootballAnalysisApp(QMainWindow):
         selector_layout = QVBoxLayout()
         
         self.movement_team_radio_group = QButtonGroup()
-        self.radio_movement_all = QRadioButton("ผู้เล่นทั้งหมด")
-        self.radio_movement_team1 = QRadioButton("ทีม 1")
-        self.radio_movement_team2 = QRadioButton("ทีม 2")
+        movement_all_text = t("ผู้เล่นทั้งหมด", "All Players")
+        self.radio_movement_all = QRadioButton(movement_all_text)
+        self.ui_elements_to_translate[self.radio_movement_all] = ("ผู้เล่นทั้งหมด", "All Players")
+        movement_team1_text = t("ทีม 1", "Team 1")
+        self.radio_movement_team1 = QRadioButton(movement_team1_text)
+        self.ui_elements_to_translate[self.radio_movement_team1] = ("ทีม 1", "Team 1")
+        movement_team2_text = t("ทีม 2", "Team 2")
+        self.radio_movement_team2 = QRadioButton(movement_team2_text)
+        self.ui_elements_to_translate[self.radio_movement_team2] = ("ทีม 2", "Team 2")
         self.radio_movement_all.setChecked(True)
         
         self.movement_team_radio_group.addButton(self.radio_movement_all, 0)
@@ -2153,7 +2300,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Speed threshold for speed zones
         speed_threshold_layout = QHBoxLayout()
-        speed_threshold_label = QLabel("Speed Threshold:")
+        speed_threshold_text = t("Speed Threshold:", "Speed Threshold:")
+        speed_threshold_label = QLabel(speed_threshold_text)
+        self.ui_elements_to_translate[speed_threshold_label] = ("Speed Threshold:", "Speed Threshold:")
         speed_threshold_label.setStyleSheet("color: #e0e0e0; font-size: 10pt;")
         self.speed_threshold_spin = QSpinBox()
         self.speed_threshold_spin.setMinimum(0)
@@ -2207,7 +2356,13 @@ class FreeFootballAnalysisApp(QMainWindow):
         self.movement_analysis_label = QLabel()
         self.movement_analysis_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.movement_analysis_label.setMinimumHeight(400)
-        self.movement_analysis_label.setText("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน")
+        no_movement_data_text = t("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน", "No movement analysis data yet\nPlease analyze video first")
+        self.movement_analysis_label.setText(no_movement_data_text)
+        if not hasattr(self, 'movement_analysis_label_text'):
+            self.movement_analysis_label_text = ("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน", "No movement analysis data yet\nPlease analyze video first")
+        # Store for translation refresh
+        if hasattr(self, 'ui_elements_to_translate'):
+            self.ui_elements_to_translate[self.movement_analysis_label] = self.movement_analysis_label_text
         self.movement_analysis_label.setStyleSheet("""
             QLabel {
                 background-color: #2b2b2b;
@@ -2240,7 +2395,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         # Save button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        self.btn_save_movement = QPushButton("บันทึกภาพวิเคราะห์")
+        save_movement_text = t("บันทึกภาพวิเคราะห์", "Save Analysis Image")
+        self.btn_save_movement = QPushButton(save_movement_text)
+        self.ui_elements_to_translate[self.btn_save_movement] = ("บันทึกภาพวิเคราะห์", "Save Analysis Image")
         self.btn_save_movement.clicked.connect(self.save_movement_analysis)
         self.btn_save_movement.setEnabled(False)
         self.btn_save_movement.setMinimumHeight(40)
@@ -2275,7 +2432,12 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Coming soon message
-        coming_soon_label = QLabel("Pass Analysis\nComing Soon")
+        pass_coming_soon_text_th = "การวิเคราะห์การส่งบอล\nเร็วๆ นี้"
+        pass_coming_soon_text_en = "Pass Analysis\nComing Soon"
+        current_lang = self.translation_manager.get_language()
+        pass_coming_soon_text = pass_coming_soon_text_en if current_lang == "EN" else pass_coming_soon_text_th
+        coming_soon_label = QLabel(pass_coming_soon_text)
+        self.ui_elements_to_translate[coming_soon_label] = (pass_coming_soon_text_th, pass_coming_soon_text_en)
         coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         coming_soon_label.setStyleSheet("""
             QLabel {
@@ -2288,15 +2450,15 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(coming_soon_label)
         
         # Description
-        desc_label = QLabel(
-            "This tab will show:\n"
-            "• Pass success rate\n"
-            "• Pass distance analysis\n"
-            "• Pass direction heat map\n"
-            "• Key passes identification\n"
-            "• Pass chains\n"
-            "• And more..."
+        pass_desc_text_th = (
+            "แท็บนี้จะแสดง:\n• อัตราความสำเร็จในการส่งบอล\n• การวิเคราะห์ระยะทางการส่งบอล\n• Heat Map ทิศทางการส่งบอล\n• การระบุการส่งบอลสำคัญ\n• ห่วงโซ่การส่งบอล\n• และอื่นๆ..."
         )
+        pass_desc_text_en = (
+            "This tab will show:\n• Pass success rate\n• Pass distance analysis\n• Pass direction heat map\n• Key passes identification\n• Pass chains\n• And more..."
+        )
+        pass_desc_text = pass_desc_text_en if current_lang == "EN" else pass_desc_text_th
+        desc_label = QLabel(pass_desc_text)
+        self.ui_elements_to_translate[desc_label] = (pass_desc_text_th, pass_desc_text_en)
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setStyleSheet("""
             QLabel {
@@ -2318,7 +2480,12 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Coming soon message
-        coming_soon_label = QLabel("Zone Analysis\nComing Soon")
+        zone_coming_soon_text_th = "การวิเคราะห์โซน\nเร็วๆ นี้"
+        zone_coming_soon_text_en = "Zone Analysis\nComing Soon"
+        current_lang = self.translation_manager.get_language()
+        zone_coming_soon_text = zone_coming_soon_text_en if current_lang == "EN" else zone_coming_soon_text_th
+        coming_soon_label = QLabel(zone_coming_soon_text)
+        self.ui_elements_to_translate[coming_soon_label] = (zone_coming_soon_text_th, zone_coming_soon_text_en)
         coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         coming_soon_label.setStyleSheet("""
             QLabel {
@@ -2331,15 +2498,15 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(coming_soon_label)
         
         # Description
-        desc_label = QLabel(
-            "This tab will show:\n"
-            "• Activity by field zones\n"
-            "• Defensive third analysis\n"
-            "• Middle third analysis\n"
-            "• Attacking third analysis\n"
-            "• Zone-based statistics\n"
-            "• And more..."
+        zone_desc_text_th = (
+            "แท็บนี้จะแสดง:\n• กิจกรรมตามโซนสนาม\n• การวิเคราะห์โซนป้องกัน\n• การวิเคราะห์โซนกลาง\n• การวิเคราะห์โซนบุก\n• สถิติตามโซน\n• และอื่นๆ..."
         )
+        zone_desc_text_en = (
+            "This tab will show:\n• Activity by field zones\n• Defensive third analysis\n• Middle third analysis\n• Attacking third analysis\n• Zone-based statistics\n• And more..."
+        )
+        zone_desc_text = zone_desc_text_en if current_lang == "EN" else zone_desc_text_th
+        desc_label = QLabel(zone_desc_text)
+        self.ui_elements_to_translate[desc_label] = (zone_desc_text_th, zone_desc_text_en)
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setStyleSheet("""
             QLabel {
@@ -2369,7 +2536,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         - Only stores full resolution when saving
         """
         if not self.tracks:
-            self.heat_map_label.setText("ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน")
+            self.heat_map_label.setText(t("ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน", "No Heat Map data yet\nPlease analyze video first"))
+            if not hasattr(self, 'heat_map_label_text'):
+                self.heat_map_label_text = "ยังไม่มีข้อมูล Heat Map\nกรุณากดวิเคราะห์วิดีโอก่อน"
             self.btn_save_heat_map.setEnabled(False)
             return
         
@@ -2462,7 +2631,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             self.btn_save_heat_map.setEnabled(True)
                 
         except Exception as e:
-            self.heat_map_label.setText(f"เกิดข้อผิดพลาด: {str(e)}")
+            self.heat_map_label.setText(f"{t('เกิดข้อผิดพลาด:', 'Error occurred:')} {str(e)}")
             self.btn_save_heat_map.setEnabled(False)
             import traceback
             print(traceback.format_exc())
@@ -2474,7 +2643,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         Opens file dialog first, then processes and saves
         """
         if not self.tracks:
-            QMessageBox.warning(self, "ข้อผิดพลาด", "ไม่มี Heat Map ที่จะบันทึก")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), t("ไม่มี Heat Map ที่จะบันทึก", "No Heat Map to save"))
             return
         
         try:
@@ -2494,9 +2663,10 @@ class FreeFootballAnalysisApp(QMainWindow):
             default_filename = f"heatmap_{type_name}_{timestamp}.png"
             
             # Open file dialog immediately
+            save_heat_map_title = t("บันทึก Heat Map", "Save Heat Map")
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
-                "บันทึก Heat Map",
+                save_heat_map_title,
                 os.path.join(PROJECT_ROOT, "output", default_filename),
                 "PNG Files (*.png);;All Files (*)"
             )
@@ -2560,7 +2730,9 @@ class FreeFootballAnalysisApp(QMainWindow):
     def update_movement_analysis(self):
         """Update movement analysis display based on selected options"""
         if not self.tracks:
-            self.movement_analysis_label.setText("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน")
+            self.movement_analysis_label.setText(t("ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน", "No movement analysis data yet\nPlease analyze video first"))
+            if not hasattr(self, 'movement_analysis_label_text'):
+                self.movement_analysis_label_text = "ยังไม่มีข้อมูลการวิเคราะห์การเคลื่อนไหว\nกรุณากดวิเคราะห์วิดีโอก่อน"
             self.movement_analysis_label.setVisible(True)
             self.movement_stats_text.setVisible(False)
             self.btn_save_movement.setEnabled(False)
@@ -2671,7 +2843,7 @@ class FreeFootballAnalysisApp(QMainWindow):
                 
                 # Check if heat map is valid
                 if heat_map is None or heat_map.size == 0:
-                    self.movement_analysis_label.setText(f"ไม่มีข้อมูลความเร็วสูงกว่า {speed_threshold} px/s")
+                    self.movement_analysis_label.setText(t(f"ไม่มีข้อมูลความเร็วสูงกว่า {speed_threshold} px/s", f"No data with speed higher than {speed_threshold} px/s"))
                     self.btn_save_movement.setEnabled(False)
                     return
                 
@@ -2686,9 +2858,11 @@ class FreeFootballAnalysisApp(QMainWindow):
                 result_image = cv2.addWeighted(field_bg, 0.5, heat_map_resized, 0.7, 0)
                 
                 # Add title
-                title_text = f"Speed Zones (>{speed_threshold} px/s)"
+                speed_zones_label = t("Speed Zones", "Speed Zones")
+                team_label = t("Team", "Team")
+                title_text = f"{speed_zones_label} (>{speed_threshold} px/s)"
                 if team_id:
-                    title_text += f" - Team {team_id}"
+                    title_text += f" - {team_label} {team_id}"
                 cv2.putText(result_image, title_text, (20, 40),
                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2, cv2.LINE_AA)
                 
@@ -2732,9 +2906,10 @@ class FreeFootballAnalysisApp(QMainWindow):
                                      for frame in sorted(speeds_by_frame.keys())]
                         
                         # Create chart
-                        chart_title = "Average Speed Over Time"
+                        chart_title = t("Average Speed Over Time", "Average Speed Over Time")
                         if team_id:
-                            chart_title += f" - Team {team_id}"
+                            team_label = t("Team", "Team")
+                            chart_title += f" - {team_label} {team_id}"
                         
                         chart_image = analyzer.create_speed_chart(avg_speeds, title=chart_title)
                         
@@ -2752,10 +2927,10 @@ class FreeFootballAnalysisApp(QMainWindow):
                         self.current_movement_analysis_image = chart_image
                         self.btn_save_movement.setEnabled(True)
                     else:
-                        self.movement_analysis_label.setText("ไม่มีข้อมูลความเร็ว")
+                        self.movement_analysis_label.setText(t("ไม่มีข้อมูลความเร็ว", "No speed data"))
                         self.btn_save_movement.setEnabled(False)
                 else:
-                    self.movement_analysis_label.setText("ไม่มีข้อมูลผู้เล่น")
+                    self.movement_analysis_label.setText(t("ไม่มีข้อมูลผู้เล่น", "No player data"))
                     self.btn_save_movement.setEnabled(False)
                     
             elif self.radio_movement_stats.isChecked():
@@ -2765,11 +2940,14 @@ class FreeFootballAnalysisApp(QMainWindow):
                 
                 analysis = analyzer.analyze_player_movement(self.tracks, team_id=team_id)
                 
-                stats_text = "=== สถิติการเคลื่อนไหว ===\n\n"
+                movement_stats_title = t("=== สถิติการเคลื่อนไหว ===", "=== Movement Statistics ===")
+                stats_text = f"{movement_stats_title}\n\n"
                 if team_id:
-                    stats_text += f"ทีม: {team_id}\n\n"
+                    team_label = t("ทีม:", "Team:")
+                    stats_text += f"{team_label} {team_id}\n\n"
                 else:
-                    stats_text += "ผู้เล่นทั้งหมด\n\n"
+                    all_players_label = t("ผู้เล่นทั้งหมด", "All Players")
+                    stats_text += f"{all_players_label}\n\n"
                 
                 if analysis:
                     # Calculate team averages
@@ -2785,24 +2963,41 @@ class FreeFootballAnalysisApp(QMainWindow):
                         player_count += 1
                     
                     if player_count > 0:
-                        stats_text += f"จำนวนผู้เล่น: {player_count}\n"
-                        stats_text += f"ระยะทางรวมเฉลี่ย: {total_distance/player_count:.1f} pixels\n"
-                        stats_text += f"ความเร็วเฉลี่ย: {total_avg_speed/player_count:.1f} px/s\n"
-                        stats_text += f"ความเร็วสูงสุด: {max_speed:.1f} px/s\n\n"
+                        num_players_label = t("จำนวนผู้เล่น:", "Number of Players:")
+                        avg_total_distance_label = t("ระยะทางรวมเฉลี่ย:", "Average Total Distance:")
+                        avg_speed_label = t("ความเร็วเฉลี่ย:", "Average Speed:")
+                        max_speed_label = t("ความเร็วสูงสุด:", "Maximum Speed:")
+                        stats_text += f"{num_players_label} {player_count}\n"
+                        stats_text += f"{avg_total_distance_label} {total_distance/player_count:.1f} pixels\n"
+                        stats_text += f"{avg_speed_label} {total_avg_speed/player_count:.1f} px/s\n"
+                        stats_text += f"{max_speed_label} {max_speed:.1f} px/s\n\n"
                     
-                    stats_text += "--- รายละเอียดผู้เล่น ---\n"
-                    stats_text += "⚠️ หน่วย: px = pixels (พิกเซล), px/s = pixels per second\n"
-                    stats_text += "   ข้อมูลนี้เป็นค่าสัมพัทธ์ ใช้สำหรับเปรียบเทียบเท่านั้น\n\n"
+                    player_details_label = t("--- รายละเอียดผู้เล่น ---", "--- Player Details ---")
+                    unit_note_label = t("⚠️ หน่วย: px = pixels (พิกเซล), px/s = pixels per second", "⚠️ Units: px = pixels, px/s = pixels per second")
+                    relative_note_label = t("   ข้อมูลนี้เป็นค่าสัมพัทธ์ ใช้สำหรับเปรียบเทียบเท่านั้น", "   This data is relative and for comparison only")
+                    stats_text += f"{player_details_label}\n"
+                    stats_text += f"{unit_note_label}\n"
+                    stats_text += f"{relative_note_label}\n\n"
+                    
+                    player_id_label = t("Player ID", "Player ID")
+                    total_distance_label = t("ระยะทางรวม:", "Total Distance:")
+                    avg_speed_label = t("ความเร็วเฉลี่ย:", "Average Speed:")
+                    max_speed_label = t("ความเร็วสูงสุด:", "Maximum Speed:")
+                    min_speed_label = t("ความเร็วต่ำสุด:", "Minimum Speed:")
+                    play_time_label = t("เวลาเล่น:", "Play Time:")
+                    seconds_label = t("วินาที", "seconds")
+                    num_frames_label = t("จำนวนเฟรม:", "Number of Frames:")
                     for pid, data in analysis.items():
-                        stats_text += f"Player ID {pid}:\n"
-                        stats_text += f"  ระยะทางรวม: {data['total_distance']:.1f} px\n"
-                        stats_text += f"  ความเร็วเฉลี่ย: {data['avg_speed']:.1f} px/s\n"
-                        stats_text += f"  ความเร็วสูงสุด: {data['max_speed']:.1f} px/s\n"
-                        stats_text += f"  ความเร็วต่ำสุด: {data['min_speed']:.1f} px/s\n"
-                        stats_text += f"  เวลาเล่น: {data['total_time']:.1f} วินาที\n"
-                        stats_text += f"  จำนวนเฟรม: {data['num_frames']}\n\n"
+                        stats_text += f"{player_id_label} {pid}:\n"
+                        stats_text += f"  {total_distance_label} {data['total_distance']:.1f} px\n"
+                        stats_text += f"  {avg_speed_label} {data['avg_speed']:.1f} px/s\n"
+                        stats_text += f"  {max_speed_label} {data['max_speed']:.1f} px/s\n"
+                        stats_text += f"  {min_speed_label} {data['min_speed']:.1f} px/s\n"
+                        stats_text += f"  {play_time_label} {data['total_time']:.1f} {seconds_label}\n"
+                        stats_text += f"  {num_frames_label} {data['num_frames']}\n\n"
                 else:
-                    stats_text += "ไม่มีข้อมูลการเคลื่อนไหว"
+                    no_movement_data_label = t("ไม่มีข้อมูลการเคลื่อนไหว", "No movement data")
+                    stats_text += no_movement_data_label
                 
                 self.movement_stats_text.setPlainText(stats_text)
                 self.btn_save_movement.setEnabled(False)  # Can't save text as image
@@ -2811,14 +3006,14 @@ class FreeFootballAnalysisApp(QMainWindow):
                 self.movement_stats_text.setVisible(False)
                 
         except Exception as e:
-            QMessageBox.warning(self, "ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการวิเคราะห์การเคลื่อนไหว:\n{str(e)}")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), f"{t('เกิดข้อผิดพลาดในการวิเคราะห์การเคลื่อนไหว:', 'Error occurred during movement analysis:')}\n{str(e)}")
             import traceback
             print(traceback.format_exc())
     
     def save_movement_analysis(self):
         """Save current movement analysis visualization as PNG"""
         if not hasattr(self, 'current_movement_analysis_image'):
-            QMessageBox.warning(self, "ข้อผิดพลาด", "ไม่มีภาพที่จะบันทึก")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), t("ไม่มีภาพที่จะบันทึก", "No image to save"))
             return
         
         try:
@@ -2838,9 +3033,10 @@ class FreeFootballAnalysisApp(QMainWindow):
             
             default_filename = f"movement_{file_type}_{timestamp}.png"
             
+            save_movement_title = t("บันทึกภาพวิเคราะห์การเคลื่อนไหว", "Save Movement Analysis Image")
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
-                "บันทึกภาพวิเคราะห์การเคลื่อนไหว",
+                save_movement_title,
                 os.path.join(PROJECT_ROOT, "output", default_filename),
                 "PNG Files (*.png);;All Files (*)"
             )
@@ -2867,7 +3063,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        title = QLabel("Logs")
+        logs_title_text = t("Logs", "Logs")
+        title = QLabel(logs_title_text)
+        self.ui_elements_to_translate[title] = "Logs"
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
@@ -2876,7 +3074,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(title)
         
         # Log file selector
-        log_label = QLabel("เลือกไฟล์ Log:")
+        log_label_text = t("เลือกไฟล์ Log:", "Select Log File:")
+        log_label = QLabel(log_label_text)
+        self.ui_elements_to_translate[log_label] = "เลือกไฟล์ Log:"
         log_label.setStyleSheet("font-weight: bold; margin-top: 10px; color: #e0e0e0;")
         layout.addWidget(log_label)
         
@@ -2884,15 +3084,19 @@ class FreeFootballAnalysisApp(QMainWindow):
         self.log_buttons = QButtonGroup()
         
         log_files = [
-            (os.path.join(PROJECT_ROOT, "logs", "tracking.log"), "Tracking Log"),
-            (os.path.join(PROJECT_ROOT, "logs", "camera_movement.log"), "Camera Movement Log"),
-            (os.path.join(PROJECT_ROOT, "logs", "memory_access.log"), "Memory Access Log")
+            (os.path.join(PROJECT_ROOT, "logs", "tracking.log"), t("Tracking Log", "Tracking Log")),
+            (os.path.join(PROJECT_ROOT, "logs", "camera_movement.log"), t("Camera Movement Log", "Camera Movement Log")),
+            (os.path.join(PROJECT_ROOT, "logs", "memory_access.log"), t("Memory Access Log", "Memory Access Log"))
         ]
         
         self.log_radio_buttons = {}
+        self.log_radio_buttons_translation = {}
         for log_path, log_name in log_files:
             radio = QRadioButton(log_name)
             radio.log_path = log_path
+            # Store original English name for translation
+            original_name = "Tracking Log" if "tracking.log" in log_path else ("Camera Movement Log" if "camera_movement.log" in log_path else "Memory Access Log")
+            self.log_radio_buttons_translation[radio] = original_name
             self.log_buttons.addButton(radio)
             log_button_layout.addWidget(radio)
             self.log_radio_buttons[log_path] = radio
@@ -2918,7 +3122,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(self.log_text)
         
         # Refresh button (optional - kept for manual refresh if needed)
-        refresh_btn = QPushButton("รีเฟรช (Refresh)")
+        refresh_text = t("รีเฟรช (Refresh)", "Refresh")
+        refresh_btn = QPushButton(refresh_text)
+        self.ui_elements_to_translate[refresh_btn] = "รีเฟรช (Refresh)"
         refresh_btn.clicked.connect(self.refresh_logs)
         layout.addWidget(refresh_btn)
         
@@ -3028,13 +3234,14 @@ class FreeFootballAnalysisApp(QMainWindow):
                 self.preview_video.load_video(self.demo_video)
                 self.btn_start.setEnabled(True)
             else:
-                self.selected_video_label.setText("ไม่พบไฟล์วิดีโอ")
+                self.selected_video_label.setText(t("ไม่พบไฟล์วิดีโอ", "Video file not found"))
                 self.btn_start.setEnabled(False)
     
     def browse_video(self):
+        select_video_title = t("เลือกไฟล์วิดีโอ", "Select Video File")
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "เลือกไฟล์วิดีโอ",
+            select_video_title,
             "",
             "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.flv *.wmv *.m4v *.3gp);;All Files (*)"
         )
@@ -3045,7 +3252,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             self.radio_demo1.setChecked(False)
             self.radio_demo2.setChecked(False)
             
-            self.selected_video_label.setText(f"ไฟล์ที่เลือก: {os.path.basename(file_path)}")
+            self.selected_video_label.setText(f"{t('ไฟล์ที่เลือก:', 'Selected file:')} {os.path.basename(file_path)}")
             self.preview_video.load_video(file_path)
             self.btn_start.setEnabled(True)
     
@@ -3070,19 +3277,19 @@ class FreeFootballAnalysisApp(QMainWindow):
         video_to_process = self.video_path if self.video_path else self.demo_video
         
         if not video_to_process or not os.path.exists(video_to_process):
-            QMessageBox.warning(self, "ข้อผิดพลาด", "กรุณาเลือกวิดีโอก่อนเริ่มวิเคราะห์")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), t("กรุณาเลือกวิดีโอก่อนเริ่มวิเคราะห์", "Please select video before starting analysis"))
             return
         
         classes = self.get_selected_classes()
         if not classes:
-            QMessageBox.warning(self, "ข้อผิดพลาด", "กรุณาเลือกอย่างน้อย 1 ตัวเลือกการแสดงผล")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), t("กรุณาเลือกอย่างน้อย 1 ตัวเลือกการแสดงผล", "Please select at least 1 display option"))
             return
         
         # Disable button and show progress
         self.btn_start.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate progress
-        self.status_label.setText("กำลังประมวลผล...")
+        self.status_label.setText(t("กำลังประมวลผล...", "Processing..."))
         self.status_label.setStyleSheet("color: #c41e3a; font-weight: bold;")
         
         # Start processing in separate thread
@@ -3131,11 +3338,11 @@ class FreeFootballAnalysisApp(QMainWindow):
                     self.btn_open_output.setEnabled(True)
                     self.current_output_path = output_path
             
-            QMessageBox.information(self, "สำเร็จ", "การประมวลผลวิดีโอเสร็จสิ้นแล้ว!\nกรุณาไปที่แท็บ Video Preview หรือ AI Results เพื่อดูผลลัพธ์")
+            QMessageBox.information(self, t("สำเร็จ", "Success"), t("การประมวลผลวิดีโอเสร็จสิ้นแล้ว!\nกรุณาไปที่แท็บ Video Preview หรือ AI Results เพื่อดูผลลัพธ์", "Video processing completed!\nPlease go to Video Preview or AI Results tab to view results"))
         else:
             self.status_label.setText("✗ เกิดข้อผิดพลาดในการประมวลผล")
             self.status_label.setStyleSheet("color: #f44336; font-weight: bold;")
-            QMessageBox.critical(self, "ข้อผิดพลาด", "เกิดข้อผิดพลาดในการประมวลผลวิดีโอ\nกรุณาลองใหม่อีกครั้ง")
+            QMessageBox.critical(self, t("ข้อผิดพลาด", "Error"), t("เกิดข้อผิดพลาดในการประมวลผลวิดีโอ\nกรุณาลองใหม่อีกครั้ง", "Error occurred during video processing\nPlease try again"))
     
     def open_video_file(self):
         """Open video file dialog and load selected video in player"""
@@ -3156,9 +3363,10 @@ class FreeFootballAnalysisApp(QMainWindow):
             "All Files (*.*)"
         )
         
+        select_video_title = t("เลือกไฟล์วิดีโอ", "Select Video File")
         video_path, _ = QFileDialog.getOpenFileName(
             self,
-            "เลือกไฟล์วิดีโอ",
+            select_video_title,
             output_folder,
             video_filter
         )
@@ -3168,7 +3376,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             self.result_video_player.load_video(video_path)
             self.current_output_path = video_path
         elif video_path:
-            QMessageBox.warning(self, "ไม่พบไฟล์", f"ไม่พบไฟล์วิดีโอ: {video_path}")
+            QMessageBox.warning(self, t("ไม่พบไฟล์", "File Not Found"), f"{t('ไม่พบไฟล์วิดีโอ:', 'Video file not found:')} {video_path}")
     
     def open_output_folder(self):
         output_folder = os.path.join(PROJECT_ROOT, "output")
@@ -3180,7 +3388,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             else:
                 os.system(f"xdg-open {output_folder}")
         else:
-            QMessageBox.warning(self, "ไม่พบโฟลเดอร์", "ไม่พบโฟลเดอร์ผลลัพธ์")
+            QMessageBox.warning(self, t("ไม่พบโฟลเดอร์", "Folder Not Found"), t("ไม่พบโฟลเดอร์ผลลัพธ์", "Output folder not found"))
     
     def load_log_file(self, log_path):
         try:
@@ -3301,17 +3509,48 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Version Information
         version_section = QHBoxLayout()
-        version_label = QLabel("เวอร์ชัน:")
+        version_label_text = t("เวอร์ชัน:", "Version:")
+        version_label = QLabel(version_label_text)
         version_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(80 * dpi_scale)}px;")
+        self.ui_elements_to_translate[version_label] = ("เวอร์ชัน:", "Version:")
         version_section.addWidget(version_label)
         
         version_value = QLabel("1.0.0")
         version_value.setStyleSheet(f"color: #ffffff; font-size: {base_font_info}pt;")
         version_section.addWidget(version_value)
+        
+        # Language toggle button - placed between version and build
+        current_lang = self.translation_manager.get_language()
+        self.language_btn = QPushButton(current_lang)
+        self.language_btn.setCheckable(True)
+        self.language_btn.setChecked(current_lang == "TH")
+        self.language_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #8b1538;
+                color: white;
+                border: none;
+                padding: {int(4 * dpi_scale)}px {int(12 * dpi_scale)}px;
+                border-radius: {int(4 * dpi_scale)}px;
+                font-size: {base_font_info}pt;
+                font-weight: bold;
+                min-width: {int(50 * dpi_scale)}px;
+            }}
+            QPushButton:hover {{
+                background-color: #a01a42;
+            }}
+            QPushButton:checked {{
+                background-color: #c41e3a;
+            }}
+        """)
+        self.language_btn.clicked.connect(self.toggle_language)
+        version_section.addWidget(self.language_btn)
+        
         version_section.addStretch()
         
-        build_label = QLabel("Build:")
+        build_label_text = t("Build:", "Build:")
+        build_label = QLabel(build_label_text)
         build_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(60 * dpi_scale)}px;")
+        self.ui_elements_to_translate[build_label] = ("Build:", "Build:")
         version_section.addWidget(build_label)
         
         build_value = QLabel("2025.12")
@@ -3330,8 +3569,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         developer_section = QHBoxLayout()
         developer_section.setSpacing(int(10 * dpi_scale))
         
-        developer_label = QLabel("ผู้พัฒนา:")
+        developer_label_text = t("ผู้พัฒนา:", "Developer:")
+        developer_label = QLabel(developer_label_text)
         developer_label.setStyleSheet(f"color: #8b1538; font-size: {base_font_info}pt; font-weight: bold; min-width: {int(80 * dpi_scale)}px;")
+        self.ui_elements_to_translate[developer_label] = ("ผู้พัฒนา:", "Developer:")
         developer_section.addWidget(developer_label)
         
         # Developer Name
@@ -3390,6 +3631,170 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         return widget
     
+    def toggle_language(self):
+        """Toggle between TH and EN languages"""
+        current_lang = self.translation_manager.get_language()
+        new_lang = "EN" if current_lang == "TH" else "TH"
+        self.translation_manager.set_language(new_lang)
+        
+        # Update button text
+        self.language_btn.setText(new_lang)
+        self.language_btn.setChecked(new_lang == "TH")
+        
+        # Refresh all UI text
+        self.refresh_ui_text()
+    
+    def refresh_ui_text(self):
+        """Refresh all UI text with current language"""
+        # Update window title
+        self.setWindowTitle(t("FREE - Football Analysis", "FREE - Football Analysis"))
+        
+        # Update tab names
+        if hasattr(self, 'tabs'):
+            tab_map = {
+                "Info": t("Info", "Info"),
+                "AI - Tracking": t("AI - Tracking", "AI - Tracking"),
+                "Video Preview": t("Video Preview", "Video Preview"),
+                "AI - Results": t("AI - Results", "AI - Results"),
+                "Manual Tracking": t("Manual Tracking", "Manual Tracking"),
+                "Logs": t("Logs", "Logs")
+            }
+            # Reverse map for finding original
+            reverse_map = {v: k for k, v in tab_map.items()}
+            for i in range(self.tabs.count()):
+                current = self.tabs.tabText(i)
+                # Check if current is already translated, find original
+                if current in reverse_map:
+                    orig = reverse_map[current]
+                    self.tabs.setTabText(i, tab_map[orig])
+                elif current in tab_map:
+                    self.tabs.setTabText(i, tab_map[current])
+        
+        # Update all stored UI elements
+        if hasattr(self, 'ui_elements_to_translate'):
+            for element, original_text in self.ui_elements_to_translate.items():
+                if element:
+                    try:
+                        # Handle tuple (thai_text, english_text) or string
+                        if isinstance(original_text, tuple):
+                            thai_text, english_text = original_text
+                            # Get current language to determine which text to use
+                            current_lang = self.translation_manager.get_language()
+                            if current_lang == "EN":
+                                translated = english_text
+                            else:
+                                translated = thai_text
+                        else:
+                            # Get the correct translation - use original_text as key
+                            translated = t(original_text, original_text)
+                        
+                        # Apply translation based on element type
+                        if hasattr(element, 'setText'):
+                            element.setText(translated)
+                        if hasattr(element, 'setTitle'):
+                            element.setTitle(translated)
+                        if hasattr(element, 'setPlaceholderText'):
+                            element.setPlaceholderText(translated)
+                        if hasattr(element, 'setToolTip'):
+                            element.setToolTip(translated)
+                    except Exception as e:
+                        print(f"Error updating UI element {element}: {e}")
+                        pass
+        
+        # Update event buttons
+        if hasattr(self, 'event_buttons_translation'):
+            for btn, event_name in self.event_buttons_translation.items():
+                if btn and hasattr(btn, 'setText'):
+                    translated = t(event_name, event_name)
+                    btn.setText(translated)
+        
+        # Update table headers
+        if hasattr(self, 'events_table'):
+            headers = [
+                t("เวลา", "Time"), t("เหตุการณ์", "Event"), t("ผลลัพธ์", "Outcome"),
+                t("ทีม", "Team"), t("ครึ่ง", "Half"), t("ผู้เล่น", "Player"), t("การจัดการ", "Management")
+            ]
+            self.events_table.setHorizontalHeaderLabels(headers)
+        
+        # Update combo boxes
+        if hasattr(self, 'half_combo'):
+            self.half_combo.clear()
+            self.half_combo.addItems([
+                t("ครึ่งแรก", "First Half"), t("ครึ่งหลัง", "Second Half"),
+                t("ต่อเวลาครึ่งแรก", "Extra Time First Half"), t("ต่อเวลาครึ่งหลัง", "Extra Time Second Half")
+            ])
+        
+        if hasattr(self, 'team_combo'):
+            # Get current team names from inputs if available, otherwise use defaults
+            if hasattr(self, 'team1_input') and hasattr(self, 'team2_input'):
+                team1_name = self.team1_input.text() if self.team1_input.text() else t("ทีม 1", "Team 1")
+                team2_name = self.team2_input.text() if self.team2_input.text() else t("ทีม 2", "Team 2")
+            else:
+                team1_name = t("ทีม 1", "Team 1")
+                team2_name = t("ทีม 2", "Team 2")
+            current_index = self.team_combo.currentIndex()
+            self.team_combo.clear()
+            self.team_combo.addItems([team1_name, team2_name, t("กลาง", "Neutral")])
+            # Restore selection if valid
+            if 0 <= current_index < 3:
+                self.team_combo.setCurrentIndex(current_index)
+        
+        # Update placeholder texts
+        if hasattr(self, 'team1_input'):
+            if hasattr(self, 'team1_input_placeholder_text'):
+                placeholder = t(self.team1_input_placeholder_text[0], self.team1_input_placeholder_text[1])
+                self.team1_input.setPlaceholderText(placeholder)
+        if hasattr(self, 'team2_input'):
+            if hasattr(self, 'team2_input_placeholder_text'):
+                placeholder = t(self.team2_input_placeholder_text[0], self.team2_input_placeholder_text[1])
+                self.team2_input.setPlaceholderText(placeholder)
+        
+        # Update AI Results sub-tabs
+        if hasattr(self, 'ai_results_subtabs_widget') and hasattr(self, 'ai_results_subtabs'):
+            sub_tabs = self.ai_results_subtabs_widget
+            for idx, (orig_name, _) in self.ai_results_subtabs.items():
+                if idx < sub_tabs.count():
+                    translated_name = t(orig_name, orig_name)
+                    sub_tabs.setTabText(idx, translated_name)
+        
+        # Update heat map radio buttons
+        if hasattr(self, 'radio_all_players'):
+            self.radio_all_players.setText(t("ผู้เล่นทั้งหมด", "All Players"))
+        if hasattr(self, 'radio_team1'):
+            self.radio_team1.setText(t("ทีม 1", "Team 1"))
+        if hasattr(self, 'radio_team2'):
+            self.radio_team2.setText(t("ทีม 2", "Team 2"))
+        if hasattr(self, 'radio_ball'):
+            self.radio_ball.setText(t("ลูกบอล", "Ball"))
+        
+        # Update movement analysis radio buttons
+        if hasattr(self, 'radio_movement_paths'):
+            self.radio_movement_paths.setText(t("เส้นทางการเคลื่อนที่", "Movement Paths"))
+        if hasattr(self, 'radio_speed_zones'):
+            self.radio_speed_zones.setText(t("Speed Zones (พื้นที่ความเร็วสูง)", "Speed Zones (High Speed Areas)"))
+        if hasattr(self, 'radio_speed_chart'):
+            self.radio_speed_chart.setText(t("กราฟความเร็ว", "Speed Chart"))
+        if hasattr(self, 'radio_movement_stats'):
+            self.radio_movement_stats.setText(t("สถิติการเคลื่อนไหว", "Movement Statistics"))
+        if hasattr(self, 'radio_movement_all'):
+            self.radio_movement_all.setText(t("ผู้เล่นทั้งหมด", "All Players"))
+        if hasattr(self, 'radio_movement_team1'):
+            self.radio_movement_team1.setText(t("ทีม 1", "Team 1"))
+        if hasattr(self, 'radio_movement_team2'):
+            self.radio_movement_team2.setText(t("ทีม 2", "Team 2"))
+        
+        # Update log radio buttons
+        if hasattr(self, 'log_radio_buttons_translation'):
+            for radio, original_name in self.log_radio_buttons_translation.items():
+                if radio:
+                    translated = t(original_name, original_name)
+                    radio.setText(translated)
+        
+        # Update manual help button tooltip
+        if hasattr(self, 'manual_help_btn') and hasattr(self, 'manual_help_btn_tooltip_text'):
+            tooltip = t(self.manual_help_btn_tooltip_text[0], self.manual_help_btn_tooltip_text[1])
+            self.manual_help_btn.setToolTip(tooltip)
+    
     def switch_mode(self, mode: str):
         """Switch between AI and Manual mode"""
         self.current_mode = mode
@@ -3425,13 +3830,31 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Video load section
         video_load_layout = QHBoxLayout()
-        self.manual_load_video_btn = QPushButton("เพิ่มวิดีโอ")
+        # Get current language to set initial text
+        current_lang = self.translation_manager.get_language()
+        add_video_text_th = "เพิ่มวิดีโอ"
+        add_video_text_en = "Add Video"
+        add_video_text = add_video_text_en if current_lang == "EN" else add_video_text_th
+        self.manual_load_video_btn = QPushButton(add_video_text)
+        self.ui_elements_to_translate[self.manual_load_video_btn] = (add_video_text_th, add_video_text_en)
         self.manual_load_video_btn.clicked.connect(self.load_video_for_manual_tracking)
         video_load_layout.addWidget(self.manual_load_video_btn)
         
         # Help button
-        self.manual_help_btn = QPushButton("วิธีใช้งาน")
-        self.manual_help_btn.setToolTip("เปิดหน้าต่างช่วยเหลือ")
+        help_text_th = "วิธีใช้งาน"
+        help_text_en = "How to Use"
+        help_tooltip_text_th = "เปิดหน้าต่างช่วยเหลือ"
+        help_tooltip_text_en = "Open help window"
+        # Get current language to set initial text
+        current_lang = self.translation_manager.get_language()
+        help_text = help_text_en if current_lang == "EN" else help_text_th
+        help_tooltip_text = help_tooltip_text_en if current_lang == "EN" else help_tooltip_text_th
+        self.manual_help_btn = QPushButton(help_text)
+        self.ui_elements_to_translate[self.manual_help_btn] = (help_text_th, help_text_en)
+        self.manual_help_btn.setToolTip(help_tooltip_text)
+        # Store tooltip for translation refresh
+        if not hasattr(self, 'manual_help_btn_tooltip_text'):
+            self.manual_help_btn_tooltip_text = (help_tooltip_text_th, help_tooltip_text_en)
         self.manual_help_btn.setFixedSize(110, 35)
         self.manual_help_btn.setStyleSheet("""
             QPushButton {
@@ -3459,6 +3882,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         # Video player - responsive sizing
         self.manual_video_player = VideoPlayerWidget()
         self.manual_video_player.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Store reference to speed label for translation
+        if hasattr(self.manual_video_player, 'speed_label'):
+            self.ui_elements_to_translate[self.manual_video_player.speed_label] = ("ความเร็ว:", "Speed:")
         left_layout.addWidget(self.manual_video_player, 1)
         
         left_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -3473,7 +3899,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         right_layout.setSpacing(10)
         
         # Event buttons panel
-        events_group = QGroupBox("Event Tracking")
+        events_group_text_th = "Event Tracking"
+        events_group_text_en = "Event Tracking"
+        events_group_text = events_group_text_en if current_lang == "EN" else events_group_text_th
+        events_group = QGroupBox(events_group_text)
+        self.ui_elements_to_translate[events_group] = (events_group_text_th, events_group_text_en)
         events_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -3494,11 +3924,25 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Team selection - editable text fields
         team1_layout = QHBoxLayout()
-        team1_label = QLabel("ทีม 1:")
+        team1_label_text_th = "ทีม 1:"
+        team1_label_text_en = "Team 1:"
+        team1_label_text = team1_label_text_en if current_lang == "EN" else team1_label_text_th
+        team1_label = QLabel(team1_label_text)
+        self.ui_elements_to_translate[team1_label] = (team1_label_text_th, team1_label_text_en)
         team1_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         self.team1_input = QLineEdit()
-        self.team1_input.setPlaceholderText("กรอกชื่อทีม 1")
-        self.team1_input.setText("ทีม 1")
+        team1_placeholder_th = "กรอกชื่อทีม 1"
+        team1_placeholder_en = "Enter Team 1 name"
+        team1_placeholder = team1_placeholder_en if current_lang == "EN" else team1_placeholder_th
+        self.team1_input.setPlaceholderText(team1_placeholder)
+        team1_default_th = "ทีม 1"
+        team1_default_en = "Team 1"
+        team1_default = team1_default_en if current_lang == "EN" else team1_default_th
+        self.team1_input.setText(team1_default)
+        # Store placeholder for translation refresh
+        if not hasattr(self, 'team1_input_placeholder_text'):
+            self.team1_input_placeholder_text = (team1_placeholder_th, team1_placeholder_en)
+        self.ui_elements_to_translate[self.team1_input] = self.team1_input_placeholder_text
         self.team1_input.setStyleSheet("""
             QLineEdit {
                 background-color: #3a3a3a;
@@ -3516,11 +3960,25 @@ class FreeFootballAnalysisApp(QMainWindow):
         events_layout.addLayout(team1_layout)
         
         team2_layout = QHBoxLayout()
-        team2_label = QLabel("ทีม 2:")
+        team2_label_text_th = "ทีม 2:"
+        team2_label_text_en = "Team 2:"
+        team2_label_text = team2_label_text_en if current_lang == "EN" else team2_label_text_th
+        team2_label = QLabel(team2_label_text)
         team2_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
+        self.ui_elements_to_translate[team2_label] = (team2_label_text_th, team2_label_text_en)
         self.team2_input = QLineEdit()
-        self.team2_input.setPlaceholderText("กรอกชื่อทีม 2")
-        self.team2_input.setText("ทีม 2")
+        team2_placeholder_th = "กรอกชื่อทีม 2"
+        team2_placeholder_en = "Enter Team 2 name"
+        team2_placeholder = team2_placeholder_en if current_lang == "EN" else team2_placeholder_th
+        self.team2_input.setPlaceholderText(team2_placeholder)
+        team2_default_th = "ทีม 2"
+        team2_default_en = "Team 2"
+        team2_default = team2_default_en if current_lang == "EN" else team2_default_th
+        self.team2_input.setText(team2_default)
+        # Store placeholder for translation refresh
+        if not hasattr(self, 'team2_input_placeholder_text'):
+            self.team2_input_placeholder_text = (team2_placeholder_th, team2_placeholder_en)
+        self.ui_elements_to_translate[self.team2_input] = self.team2_input_placeholder_text
         self.team2_input.setStyleSheet("""
             QLineEdit {
                 background-color: #3a3a3a;
@@ -3539,7 +3997,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Player settings buttons
         players_settings_layout = QHBoxLayout()
-        self.team1_players_btn = QPushButton("ตั้งค่ารายชื่อทีม 1")
+        team1_players_text_th = "ตั้งค่ารายชื่อทีม 1"
+        team1_players_text_en = "Set Team 1 Players"
+        team1_players_text = team1_players_text_en if current_lang == "EN" else team1_players_text_th
+        self.team1_players_btn = QPushButton(team1_players_text)
+        self.ui_elements_to_translate[self.team1_players_btn] = (team1_players_text_th, team1_players_text_en)
         self.team1_players_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -3554,7 +4016,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         """)
         self.team1_players_btn.clicked.connect(lambda: self.show_players_dialog(1))
         
-        self.team2_players_btn = QPushButton("ตั้งค่ารายชื่อทีม 2")
+        team2_players_text_th = "ตั้งค่ารายชื่อทีม 2"
+        team2_players_text_en = "Set Team 2 Players"
+        team2_players_text = team2_players_text_en if current_lang == "EN" else team2_players_text_th
+        self.team2_players_btn = QPushButton(team2_players_text)
+        self.ui_elements_to_translate[self.team2_players_btn] = (team2_players_text_th, team2_players_text_en)
         self.team2_players_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
@@ -3577,10 +4043,23 @@ class FreeFootballAnalysisApp(QMainWindow):
         team_half_layout = QHBoxLayout()
         
         # Team selection
-        team_select_label = QLabel("เลือกทีม:")
+        team_select_label_text_th = "เลือกทีม:"
+        team_select_label_text_en = "Select Team:"
+        team_select_label_text = team_select_label_text_en if current_lang == "EN" else team_select_label_text_th
+        team_select_label = QLabel(team_select_label_text)
+        self.ui_elements_to_translate[team_select_label] = (team_select_label_text_th, team_select_label_text_en)
         team_select_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         self.team_combo = QComboBox()
-        self.team_combo.addItems(["ทีม 1", "ทีม 2", "กลาง"])
+        team1_combo_th = "ทีม 1"
+        team1_combo_en = "Team 1"
+        team2_combo_th = "ทีม 2"
+        team2_combo_en = "Team 2"
+        neutral_text_th = "กลาง"
+        neutral_text_en = "Neutral"
+        team1_combo = team1_combo_en if current_lang == "EN" else team1_combo_th
+        team2_combo = team2_combo_en if current_lang == "EN" else team2_combo_th
+        neutral_text = neutral_text_en if current_lang == "EN" else neutral_text_th
+        self.team_combo.addItems([team1_combo, team2_combo, neutral_text])
         self.team_combo.setStyleSheet("""
             QComboBox {
                 background-color: #3a3a3a;
@@ -3607,10 +4086,26 @@ class FreeFootballAnalysisApp(QMainWindow):
         self.team2_input.textChanged.connect(self.update_team_combo)
         
         # Half selection
-        half_label = QLabel("ครึ่ง:")
+        half_label_text_th = "ครึ่ง:"
+        half_label_text_en = "Half:"
+        half_label_text = half_label_text_en if current_lang == "EN" else half_label_text_th
+        half_label = QLabel(half_label_text)
+        self.ui_elements_to_translate[half_label] = (half_label_text_th, half_label_text_en)
         half_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         self.half_combo = QComboBox()
-        self.half_combo.addItems(["ครึ่งแรก", "ครึ่งหลัง", "ต่อเวลาครึ่งแรก", "ต่อเวลาครึ่งหลัง"])
+        half1_th = "ครึ่งแรก"
+        half1_en = "First Half"
+        half2_th = "ครึ่งหลัง"
+        half2_en = "Second Half"
+        half3_th = "ต่อเวลาครึ่งแรก"
+        half3_en = "Extra Time First Half"
+        half4_th = "ต่อเวลาครึ่งหลัง"
+        half4_en = "Extra Time Second Half"
+        half1 = half1_en if current_lang == "EN" else half1_th
+        half2 = half2_en if current_lang == "EN" else half2_th
+        half3 = half3_en if current_lang == "EN" else half3_th
+        half4 = half4_en if current_lang == "EN" else half4_th
+        self.half_combo.addItems([half1, half2, half3, half4])
         self.half_combo.setStyleSheet("""
             QComboBox {
                 background-color: #3a3a3a;
@@ -3643,7 +4138,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Customize button
         customize_layout = QHBoxLayout()
-        self.customize_events_btn = QPushButton("ปรับแต่งปุ่ม")
+        customize_text_th = "ปรับแต่งปุ่ม"
+        customize_text_en = "Customize Buttons"
+        customize_text = customize_text_en if current_lang == "EN" else customize_text_th
+        self.customize_events_btn = QPushButton(customize_text)
+        self.ui_elements_to_translate[self.customize_events_btn] = (customize_text_th, customize_text_en)
         self.customize_events_btn.clicked.connect(self.show_customize_events_dialog)
         customize_layout.addWidget(self.customize_events_btn)
         customize_layout.addStretch()
@@ -3674,7 +4173,9 @@ class FreeFootballAnalysisApp(QMainWindow):
                 row_layout.setSpacing(5)
                 grid_layout.addLayout(row_layout)
             
-            btn = QPushButton(event_name)
+            # Translate event name for button
+            translated_event_name = t(event_name, event_name)
+            btn = QPushButton(translated_event_name)
             btn.setMinimumSize(120, 40)
             btn.setMaximumSize(120, 40)
             btn.setStyleSheet(f"""
@@ -3699,6 +4200,10 @@ class FreeFootballAnalysisApp(QMainWindow):
             btn.setVisible(event_name in self.enabled_events)
             row_layout.addWidget(btn)
             self.event_buttons[event_name] = btn
+            # Store for translation refresh
+            if not hasattr(self, 'event_buttons_translation'):
+                self.event_buttons_translation = {}
+            self.event_buttons_translation[btn] = event_name
         
         # Add stretch to fill remaining space
         grid_layout.addStretch()
@@ -3714,7 +4219,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         main_layout.addWidget(top_splitter, 1)  # Make top section expand
         
         # Bottom section: Event List (scrollable)
-        events_list_group = QGroupBox("Event List")
+        events_list_text_th = "Event List"
+        events_list_text_en = "Event List"
+        events_list_text = events_list_text_en if current_lang == "EN" else events_list_text_th
+        events_list_group = QGroupBox(events_list_text)
+        self.ui_elements_to_translate[events_list_group] = (events_list_text_th, events_list_text_en)
         events_list_group.setStyleSheet(events_group.styleSheet())
         events_list_group.setFixedHeight(300)  # Fixed height to match with Event Tracking
         events_list_layout = QVBoxLayout()
@@ -3744,7 +4253,30 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         self.events_table = QTableWidget()
         self.events_table.setColumnCount(7)
-        self.events_table.setHorizontalHeaderLabels(["เวลา", "เหตุการณ์", "ผลลัพธ์", "ทีม", "ครึ่ง", "ผู้เล่น", "การจัดการ"])
+        time_header_th = "เวลา"
+        time_header_en = "Time"
+        event_header_th = "เหตุการณ์"
+        event_header_en = "Event"
+        outcome_header_th = "ผลลัพธ์"
+        outcome_header_en = "Outcome"
+        team_header_th = "ทีม"
+        team_header_en = "Team"
+        half_header_th = "ครึ่ง"
+        half_header_en = "Half"
+        player_header_th = "ผู้เล่น"
+        player_header_en = "Player"
+        management_header_th = "การจัดการ"
+        management_header_en = "Management"
+        table_headers = [
+            time_header_en if current_lang == "EN" else time_header_th,
+            event_header_en if current_lang == "EN" else event_header_th,
+            outcome_header_en if current_lang == "EN" else outcome_header_th,
+            team_header_en if current_lang == "EN" else team_header_th,
+            half_header_en if current_lang == "EN" else half_header_th,
+            player_header_en if current_lang == "EN" else player_header_th,
+            management_header_en if current_lang == "EN" else management_header_th
+        ]
+        self.events_table.setHorizontalHeaderLabels(table_headers)
         self.events_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.events_table.setStyleSheet("""
             QTableWidget {
@@ -3774,15 +4306,27 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Buttons for event list
         event_buttons_layout = QHBoxLayout()
-        self.delete_event_btn = QPushButton("ลบที่เลือก")
+        delete_selected_text_th = "ลบที่เลือก"
+        delete_selected_text_en = "Delete Selected"
+        delete_selected_text = delete_selected_text_en if current_lang == "EN" else delete_selected_text_th
+        self.delete_event_btn = QPushButton(delete_selected_text)
+        self.ui_elements_to_translate[self.delete_event_btn] = (delete_selected_text_th, delete_selected_text_en)
         self.delete_event_btn.clicked.connect(self.delete_selected_event)
         event_buttons_layout.addWidget(self.delete_event_btn)
         
-        self.clear_events_btn = QPushButton("ลบทั้งหมด")
+        clear_all_text_th = "ลบทั้งหมด"
+        clear_all_text_en = "Clear All"
+        clear_all_text = clear_all_text_en if current_lang == "EN" else clear_all_text_th
+        self.clear_events_btn = QPushButton(clear_all_text)
+        self.ui_elements_to_translate[self.clear_events_btn] = (clear_all_text_th, clear_all_text_en)
         self.clear_events_btn.clicked.connect(self.clear_all_events)
         event_buttons_layout.addWidget(self.clear_events_btn)
         
-        self.export_btn = QPushButton("ส่งออก CSV")
+        export_csv_text_th = "ส่งออก CSV"
+        export_csv_text_en = "Export CSV"
+        export_csv_text = export_csv_text_en if current_lang == "EN" else export_csv_text_th
+        self.export_btn = QPushButton(export_csv_text)
+        self.ui_elements_to_translate[self.export_btn] = (export_csv_text_th, export_csv_text_en)
         self.export_btn.clicked.connect(self.export_tracking_to_csv)
         event_buttons_layout.addWidget(self.export_btn)
         
@@ -3843,7 +4387,7 @@ class FreeFootballAnalysisApp(QMainWindow):
     def show_outcome_dialog(self, event_type: str, outcomes: list, was_playing: bool = False):
         """Show dialog to select outcome"""
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"เลือกผลลัพธ์ - {event_type}")
+        dialog.setWindowTitle(f"{t('เลือกผลลัพธ์ -', 'Select outcome for:')} {t(event_type, event_type)}")
         dialog.setMinimumSize(300, 200)
         dialog.setStyleSheet("""
             QDialog {
@@ -3864,14 +4408,14 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         layout = QVBoxLayout(dialog)
         
-        title = QLabel(f"เลือกผลลัพธ์สำหรับ: {event_type}")
+        title = QLabel(f"{t('เลือกผลลัพธ์สำหรับ:', 'Select outcome for:')} {t(event_type, event_type)}")
         title.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-bottom: 15px;")
         layout.addWidget(title)
         
         # Create outcome buttons
         outcome_buttons = []
         for outcome in outcomes:
-            btn = QPushButton(outcome)
+            btn = QPushButton(t(outcome, outcome))
             btn.setMinimumHeight(40)
             btn.setStyleSheet("""
                 QPushButton {
@@ -3891,7 +4435,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             outcome_buttons.append(btn)
         
         # Cancel button
-        cancel_btn = QPushButton("ยกเลิก")
+        cancel_btn = QPushButton(t("ยกเลิก", "Cancel"))
         cancel_btn.clicked.connect(lambda: self.on_outcome_cancelled(dialog, was_playing))
         layout.addWidget(cancel_btn)
         
@@ -3920,7 +4464,8 @@ class FreeFootballAnalysisApp(QMainWindow):
     def show_players_dialog(self, team_num: int):
         """Show dialog to input players for a team with name, surname, and position"""
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"ตั้งค่ารายชื่อทีม {team_num}")
+        set_players_title = t(f"ตั้งค่ารายชื่อทีม {team_num}", f"Set Team {team_num} Players")
+        dialog.setWindowTitle(set_players_title)
         dialog.setMinimumSize(600, 500)
         dialog.setStyleSheet("""
             QDialog {
@@ -3961,18 +4506,21 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         layout = QVBoxLayout(dialog)
         
-        title = QLabel(f"กรอกรายชื่อนักเตะทีม {team_num}")
+        title_text = t(f"กรอกรายชื่อนักเตะทีม {team_num}", f"Enter Team {team_num} Players")
+        title = QLabel(title_text)
         title.setStyleSheet("font-weight: bold; font-size: 14pt; color: #c41e3a; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        instruction = QLabel("กรอกข้อมูลนักเตะ: ชื่อ, นามสกุล, ตำแหน่ง (สามารถเพิ่มแถวได้โดยกด Enter)")
+        instruction_text = t("กรอกข้อมูลนักเตะ: ชื่อ, นามสกุล, ตำแหน่ง (สามารถเพิ่มแถวได้โดยกด Enter)", "Enter player information: Name, Surname, Position (Press Enter to add new row)")
+        instruction = QLabel(instruction_text)
         instruction.setStyleSheet("color: #b0b0b0; margin-bottom: 10px;")
         layout.addWidget(instruction)
         
         # Create table for players
         players_table = QTableWidget()
         players_table.setColumnCount(3)
-        players_table.setHorizontalHeaderLabels(["ชื่อ", "นามสกุล", "ตำแหน่ง"])
+        table_headers = [t("ชื่อ", "Name"), t("นามสกุล", "Surname"), t("ตำแหน่ง", "Position")]
+        players_table.setHorizontalHeaderLabels(table_headers)
         players_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         players_table.setRowCount(20)  # Start with 20 rows
         
@@ -3993,7 +4541,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Buttons
         buttons_layout = QHBoxLayout()
-        add_row_btn = QPushButton("เพิ่มแถว")
+        add_row_btn = QPushButton(t("เพิ่มแถว", "Add Row"))
         add_row_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -4063,7 +4611,7 @@ class FreeFootballAnalysisApp(QMainWindow):
     def show_goal_dialog(self, event_type: str, outcome: str, was_playing: bool = False):
         """Show goal dialog when outcome is 'ประตู' - always show for all goals"""
         if self.manual_video_player.media_player.source().isEmpty():
-            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อนบันทึกประตู")
+            QMessageBox.warning(self, t("ไม่มีวิดีโอ", "No Video"), t("กรุณาโหลดวิดีโอก่อนบันทึกประตู", "Please load video before saving goal"))
             if was_playing:
                 self.manual_video_player.media_player.play()
             return
@@ -4073,7 +4621,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             self.manual_video_player.media_player.pause()
         
         dialog = QDialog(self)
-        dialog.setWindowTitle("บันทึกประตู")
+        dialog.setWindowTitle(t("บันทึกประตู", "Save Goal"))
         dialog.setMinimumSize(350, 200)
         dialog.setStyleSheet("""
             QDialog {
@@ -4094,30 +4642,33 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         layout = QVBoxLayout(dialog)
         
-        title = QLabel("บันทึกประตู")
+        title = QLabel(t("บันทึกประตู", "Save Goal"))
         title.setStyleSheet("font-weight: bold; font-size: 14pt; color: #c41e3a; margin-bottom: 15px;")
         layout.addWidget(title)
         
         # Team selection
         team_layout = QHBoxLayout()
-        team_label = QLabel("ทีมที่ได้ประตู:")
+        team_label = QLabel(t("ทีมที่ได้ประตู:", "Team that scored:"))
         team_label.setStyleSheet("font-weight: bold;")
         team_combo = QComboBox()
-        team_combo.addItems([self.team1_input.text() or "ทีม 1", self.team2_input.text() or "ทีม 2"])
+        team1_default = t("ทีม 1", "Team 1")
+        team2_default = t("ทีม 2", "Team 2")
+        team_combo.addItems([self.team1_input.text() or team1_default, self.team2_input.text() or team2_default])
         team_layout.addWidget(team_label)
         team_layout.addWidget(team_combo)
         layout.addLayout(team_layout)
         
         # Player selection (if players are available)
         player_layout = QHBoxLayout()
-        player_label = QLabel("ผู้ยิงประตู:")
+        player_label = QLabel(t("ผู้ยิงประตู:", "Goal Scorer:"))
         player_label.setStyleSheet("font-weight: bold;")
         player_combo = QComboBox()
-        player_combo.addItem("ไม่ระบุ")
+        not_specified = t("ไม่ระบุ", "Not Specified")
+        player_combo.addItem(not_specified)
         
         def update_player_list(team_index):
             player_combo.clear()
-            player_combo.addItem("ไม่ระบุ")
+            player_combo.addItem(not_specified)
             players_list = self.team1_players if team_index == 0 else self.team2_players
             for player in players_list:
                 if isinstance(player, dict):
@@ -4164,16 +4715,18 @@ class FreeFootballAnalysisApp(QMainWindow):
                 team_name = team_combo.currentText()
                 
                 half_text = self.half_combo.currentText()
-                half_mapping = {
-                    "ครึ่งแรก": 1,
-                    "ครึ่งหลัง": 2,
-                    "ต่อเวลาครึ่งแรก": 3,
-                    "ต่อเวลาครึ่งหลัง": 4
+                # Map half selection to numeric value - check both languages
+                half_mapping_direct = {
+                    "ครึ่งแรก": 1, "First Half": 1,
+                    "ครึ่งหลัง": 2, "Second Half": 2,
+                    "ต่อเวลาครึ่งแรก": 3, "Extra Time First Half": 3,
+                    "ต่อเวลาครึ่งหลัง": 4, "Extra Time Second Half": 4
                 }
-                half = half_mapping.get(half_text, 1)
+                half = half_mapping_direct.get(half_text, 1)
                 
                 player_name = None
-                if player_combo.currentIndex() > 0:  # Not "ไม่ระบุ"
+                # Check if not "ไม่ระบุ" / "Not Specified" (index 0 is always the "not specified" option)
+                if player_combo.currentIndex() > 0:
                     player_name = player_combo.currentText()
                 
                 if self.manual_tracking_data:
@@ -4197,7 +4750,7 @@ class FreeFootballAnalysisApp(QMainWindow):
                         f"บันทึกประตูของ {team_name}{player_info}\nที่เวลา {int(current_time // 60)}:{int(current_time % 60):02d}"
                     )
             except Exception as e:
-                QMessageBox.warning(self, "ข้อผิดพลาด", f"ไม่สามารถบันทึกประตูได้: {str(e)}")
+                QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), f"{t('ไม่สามารถบันทึกประตูได้:', 'Cannot save goal:')} {str(e)}")
         
         # Resume video if it was playing
         if was_playing:
@@ -4207,29 +4760,41 @@ class FreeFootballAnalysisApp(QMainWindow):
         """Add a tracking event at current video time"""
         # Check if video is loaded
         if self.manual_video_player.media_player.source().isEmpty():
-            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อนเพิ่มเหตุการณ์")
+            no_video_title = t("ไม่มีวิดีโอ", "No Video")
+            no_video_msg = t("กรุณาโหลดวิดีโอก่อนเพิ่มเหตุการณ์", "Please load video before adding event")
+            QMessageBox.warning(self, no_video_title, no_video_msg)
             return
         
         try:
             current_time = self.manual_video_player.media_player.position() / 1000.0  # Convert to seconds
             team_selection = self.team_combo.currentText()
             # Use the actual team name from combo box (which is updated with real team names)
-            # If it's "กลาง", keep it, otherwise use the selected team name directly
-            if team_selection == "กลาง":
+            # Check for "กลาง" in both languages
+            neutral_th = t("กลาง", "Neutral")
+            neutral_en = "Neutral"
+            if team_selection == neutral_th or team_selection == neutral_en:
+                # Store as original Thai key for consistency
                 team = "กลาง"
             else:
                 # Use the team name directly from combo box (already updated with real names)
                 team = team_selection
             
-            # Map half selection to numeric value
+            # Map half selection to numeric value - check both languages
             half_text = self.half_combo.currentText()
-            half_mapping = {
-                "ครึ่งแรก": 1,
-                "ครึ่งหลัง": 2,
-                "ต่อเวลาครึ่งแรก": 3,
-                "ต่อเวลาครึ่งหลัง": 4
+            half_mapping_th = {
+                t("ครึ่งแรก", "First Half"): 1,
+                t("ครึ่งหลัง", "Second Half"): 2,
+                t("ต่อเวลาครึ่งแรก", "Extra Time First Half"): 3,
+                t("ต่อเวลาครึ่งหลัง", "Extra Time Second Half"): 4
             }
-            half = half_mapping.get(half_text, 1)
+            # Also check direct Thai/English values
+            half_mapping_direct = {
+                "ครึ่งแรก": 1, "First Half": 1,
+                "ครึ่งหลัง": 2, "Second Half": 2,
+                "ต่อเวลาครึ่งแรก": 3, "Extra Time First Half": 3,
+                "ต่อเวลาครึ่งหลัง": 4, "Extra Time Second Half": 4
+            }
+            half = half_mapping_direct.get(half_text, half_mapping_th.get(half_text, 1))
             
             if self.manual_tracking_data:
                 event = TrackingEvent(
@@ -4243,12 +4808,15 @@ class FreeFootballAnalysisApp(QMainWindow):
                 self.manual_tracking_data.add_event(event)
                 self.update_events_table()
         except Exception as e:
-            QMessageBox.warning(self, "ข้อผิดพลาด", f"ไม่สามารถเพิ่มเหตุการณ์ได้: {str(e)}")
+            QMessageBox.warning(self, t("ข้อผิดพลาด", "Error"), f"{t('ไม่สามารถเพิ่มเหตุการณ์ได้:', 'Cannot add event:')} {str(e)}")
     
     def update_events_table(self):
         """Update the events table"""
         if not self.manual_tracking_data:
             return
+        
+        # Get current language for translation
+        current_lang = self.translation_manager.get_language()
         
         self.events_table.setRowCount(len(self.manual_tracking_data.events))
         
@@ -4257,32 +4825,50 @@ class FreeFootballAnalysisApp(QMainWindow):
             time_str = f"{int(event.timestamp // 60):02d}:{int(event.timestamp % 60):02d}"
             self.events_table.setItem(row, 0, QTableWidgetItem(time_str))
             
-            # Event
-            self.events_table.setItem(row, 1, QTableWidgetItem(event.event_type))
+            # Event - translate event_type
+            translated_event_type = t(event.event_type, event.event_type)
+            self.events_table.setItem(row, 1, QTableWidgetItem(translated_event_type))
             
-            # Outcome
-            outcome_text = event.outcome if event.outcome else "-"
-            self.events_table.setItem(row, 2, QTableWidgetItem(outcome_text))
+            # Outcome - translate outcome
+            if event.outcome:
+                translated_outcome = t(event.outcome, event.outcome)
+            else:
+                translated_outcome = "-"
+            self.events_table.setItem(row, 2, QTableWidgetItem(translated_outcome))
             
-            # Team
-            self.events_table.setItem(row, 3, QTableWidgetItem(event.team))
+            # Team - translate "กลาง" if needed, otherwise keep team name
+            if event.team == "กลาง":
+                translated_team = t("กลาง", "Neutral")
+            else:
+                translated_team = event.team
+            self.events_table.setItem(row, 3, QTableWidgetItem(translated_team))
             
-            # Half - convert numeric to text
-            half_mapping = {
+            # Half - convert numeric to text with translation
+            half_mapping_th = {
                 1: "ครึ่งแรก",
                 2: "ครึ่งหลัง",
                 3: "ต่อเวลาครึ่งแรก",
                 4: "ต่อเวลาครึ่งหลัง"
             }
-            half_text = half_mapping.get(event.half, f"ครึ่ง {event.half}")
+            half_mapping_en = {
+                1: "First Half",
+                2: "Second Half",
+                3: "Extra Time First Half",
+                4: "Extra Time Second Half"
+            }
+            if current_lang == "EN":
+                half_text = half_mapping_en.get(event.half, f"Half {event.half}")
+            else:
+                half_text = half_mapping_th.get(event.half, f"ครึ่ง {event.half}")
             self.events_table.setItem(row, 4, QTableWidgetItem(half_text))
             
             # Player name
             player_name = event.player_name if event.player_name else "-"
             self.events_table.setItem(row, 5, QTableWidgetItem(player_name))
             
-            # Delete button
-            delete_btn = QPushButton("ลบ")
+            # Delete button - translate
+            delete_text = t("ลบ", "Delete")
+            delete_btn = QPushButton(delete_text)
             delete_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #f44336;
@@ -4322,7 +4908,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Check if video is loaded
         if self.manual_video_player.media_player.source().isEmpty():
-            QMessageBox.warning(self, "ไม่มีวิดีโอ", "กรุณาโหลดวิดีโอก่อน")
+            QMessageBox.warning(self, t("ไม่มีวิดีโอ", "ไม่มีวิดีโอ"), t("กรุณาโหลดวิดีโอก่อน", "กรุณาโหลดวิดีโอก่อน"))
             return
         
         # Convert timestamp (seconds) to milliseconds
@@ -4341,7 +4927,7 @@ class FreeFootballAnalysisApp(QMainWindow):
     def clear_all_events(self):
         """Clear all events"""
         reply = QMessageBox.question(
-            self, "ยืนยัน", "คุณแน่ใจหรือไม่ว่าต้องการลบเหตุการณ์ทั้งหมด?",
+            self, t("ยืนยัน", "ยืนยัน"), t("คุณแน่ใจหรือไม่ว่าต้องการลบเหตุการณ์ทั้งหมด?", "คุณแน่ใจหรือไม่ว่าต้องการลบเหตุการณ์ทั้งหมด?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -4351,12 +4937,13 @@ class FreeFootballAnalysisApp(QMainWindow):
     def export_tracking_to_csv(self):
         """Export tracking data to Excel with multiple sheets"""
         if not self.manual_tracking_data or not self.manual_tracking_data.events:
-            QMessageBox.warning(self, "ไม่มีข้อมูล", "ไม่มีเหตุการณ์ที่ติดตามเพื่อส่งออก")
+            QMessageBox.warning(self, t("ไม่มีข้อมูล", "ไม่มีข้อมูล"), t("ไม่มีเหตุการณ์ที่ติดตามเพื่อส่งออก", "ไม่มีเหตุการณ์ที่ติดตามเพื่อส่งออก"))
             return
         
+        export_title = t("ส่งออกข้อมูลการติดตาม", "Export Tracking Data")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "ส่งออกข้อมูลการติดตาม",
+            export_title,
             "",
             "Excel Files (*.xlsx);;CSV Files (*.csv);;All Files (*)"
         )
@@ -4372,25 +4959,25 @@ class FreeFootballAnalysisApp(QMainWindow):
                     self.manual_tracking_data.export_to_excel(file_path)
                     
                     sheet_info = (
-                        "ไฟล์ประกอบด้วย:\n"
-                        "- Sheet 1: ข้อมูลดิบ\n"
-                        "- Sheet 2: สรุปผลรวม (ไม่มีเปอร์เซ็นต์)\n"
+                        f"{t('ไฟล์ประกอบด้วย:', 'ไฟล์ประกอบด้วย:')}\n"
+                        f"- Sheet 1: {t('ข้อมูลดิบ', 'ข้อมูลดิบ')}\n"
+                        f"- Sheet 2: {t('สรุปผลรวม', 'สรุปผลรวม')} ({t('ไม่มีเปอร์เซ็นต์', 'ไม่มีเปอร์เซ็นต์')})\n"
                     )
                     if has_comparison:
-                        sheet_info += "- Sheet 3: เปรียบเทียบทีม\n"
-                        sheet_info += "- Sheet 4-7: สรุปตามครึ่ง"
+                        sheet_info += f"- Sheet 3: {t('เปรียบเทียบทีม', 'เปรียบเทียบทีม')}\n"
+                        sheet_info += f"- Sheet 4-7: {t('สรุปตามครึ่ง', 'สรุปตามครึ่ง')}"
                     else:
-                        sheet_info += "- Sheet 3-6: สรุปตามครึ่ง"
+                        sheet_info += f"- Sheet 3-6: {t('สรุปตามครึ่ง', 'สรุปตามครึ่ง')}"
                     
                     QMessageBox.information(
                         self, 
-                        "สำเร็จ", 
-                        f"ส่งออกข้อมูลการติดตามไปยัง:\n{file_path}\n\n{sheet_info}"
+                        t("สำเร็จ", "สำเร็จ"), 
+                        f"{t('ส่งออกข้อมูลการติดตามไปยัง:', 'ส่งออกข้อมูลการติดตามไปยัง:')}\n{file_path}\n\n{sheet_info}"
                     )
                 else:
                     # Fallback to CSV
                     self.manual_tracking_data.export_to_csv(file_path)
-                    QMessageBox.information(self, "สำเร็จ", f"ส่งออกข้อมูลการติดตามไปยัง:\n{file_path}")
+                    QMessageBox.information(self, t("สำเร็จ", "Success"), f"{t('ส่งออกข้อมูลการติดตามไปยัง:', 'Tracking data exported to:')}\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(
                     self, 
@@ -4402,9 +4989,10 @@ class FreeFootballAnalysisApp(QMainWindow):
     
     def load_video_for_manual_tracking(self):
         """เพิ่มวิดีโอสำหรับติดตามด้วยมือ"""
+        add_video_title = t("เพิ่มวิดีโอสำหรับติดตามด้วยมือ", "Add Video for Manual Tracking")
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "เพิ่มวิดีโอสำหรับติดตามด้วยมือ",
+            add_video_title,
             "",
             "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)"
         )
@@ -4433,17 +5021,19 @@ class FreeFootballAnalysisApp(QMainWindow):
             media_status = self.manual_video_player.media_player.mediaStatus()
             # Check for loaded status
             if media_status in [QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia]:
-                QMessageBox.information(
-                    self, 
-                    "โหลดวิดีโอสำเร็จ", 
-                    f"โหลดวิดีโอสำเร็จ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+                success_title = t("โหลดวิดีโอสำเร็จ", "Video Loaded Successfully")
+                success_msg = t(
+                    f"โหลดวิดีโอสำเร็จ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว",
+                    f"Video loaded successfully:\n{os.path.basename(file_path)}\n\nYou can now play the video and add tracking events"
                 )
+                QMessageBox.information(self, success_title, success_msg)
             elif media_status == QMediaPlayer.MediaStatus.InvalidMedia:
-                QMessageBox.warning(
-                    self, 
-                    "วิดีโอไม่ถูกต้อง", 
-                    f"ไฟล์วิดีโออาจเสียหายหรือรูปแบบไม่รองรับ:\n{os.path.basename(file_path)}\n\nกรุณาลองใช้ไฟล์วิดีโออื่น"
+                invalid_title = t("วิดีโอไม่ถูกต้อง", "Invalid Video")
+                invalid_msg = t(
+                    f"ไฟล์วิดีโออาจเสียหายหรือรูปแบบไม่รองรับ:\n{os.path.basename(file_path)}\n\nกรุณาลองใช้ไฟล์วิดีโออื่น",
+                    f"Video file may be corrupted or format not supported:\n{os.path.basename(file_path)}\n\nPlease try another video file"
                 )
+                QMessageBox.warning(self, invalid_title, invalid_msg)
             else:
                 # Still loading, wait a bit more (max 5 seconds)
                 if not hasattr(self, '_video_load_attempts'):
@@ -4453,24 +5043,31 @@ class FreeFootballAnalysisApp(QMainWindow):
                     QTimer.singleShot(1000, lambda: self.check_video_loaded(file_path))
                 else:
                     # Assume loaded after timeout
-                    QMessageBox.information(
-                        self, 
-                        "โหลดวิดีโอสำเร็จ", 
-                        f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+                    success_title = t("โหลดวิดีโอสำเร็จ", "Video Loaded Successfully")
+                    success_msg = t(
+                        f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว",
+                        f"Video loaded:\n{os.path.basename(file_path)}\n\nYou can now play the video and add tracking events"
                     )
+                    QMessageBox.information(self, success_title, success_msg)
                     self._video_load_attempts = 0
         except Exception as e:
             # If check fails, assume it's loaded
-            QMessageBox.information(
-                self, 
-                "โหลดวิดีโอสำเร็จ", 
-                f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว"
+            success_title = t("โหลดวิดีโอสำเร็จ", "Video Loaded Successfully")
+            success_msg = t(
+                f"โหลดวิดีโอ:\n{os.path.basename(file_path)}\n\nคุณสามารถเล่นวิดีโอและเพิ่มเหตุการณ์ติดตามได้แล้ว",
+                f"Video loaded:\n{os.path.basename(file_path)}\n\nYou can now play the video and add tracking events"
             )
+            QMessageBox.information(self, success_title, success_msg)
     
     def show_customize_events_dialog(self):
         """Show dialog to customize which tracking events are visible"""
+        # Get current language to set initial text
+        current_lang = self.translation_manager.get_language()
+        
         dialog = QDialog(self)
-        dialog.setWindowTitle("ปรับแต่งปุ่มติดตาม")
+        dialog_title_th = "ปรับแต่งปุ่มติดตาม"
+        dialog_title_en = "Customize Tracking Buttons"
+        dialog.setWindowTitle(dialog_title_en if current_lang == "EN" else dialog_title_th)
         dialog.setMinimumSize(400, 500)
         dialog.setStyleSheet("""
             QDialog {
@@ -4500,17 +5097,26 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         layout = QVBoxLayout(dialog)
         
-        title = QLabel("เลือกปุ่มที่ต้องการแสดง:")
+        title_text_th = "เลือกปุ่มที่ต้องการแสดง:"
+        title_text_en = "Select buttons to display:"
+        title_text = title_text_en if current_lang == "EN" else title_text_th
+        title = QLabel(title_text)
         title.setStyleSheet("font-weight: bold; font-size: 12pt; color: #c41e3a; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        instruction = QLabel("เลือกปุ่มที่ต้องการแสดงในแผงติดตาม:")
+        instruction_text_th = "เลือกปุ่มที่ต้องการแสดงในแผงติดตาม:"
+        instruction_text_en = "Select buttons to display in the tracking panel:"
+        instruction_text = instruction_text_en if current_lang == "EN" else instruction_text_th
+        instruction = QLabel(instruction_text)
         instruction.setStyleSheet("color: #b0b0b0; margin-bottom: 15px;")
         layout.addWidget(instruction)
         
         # Select All / Clear All buttons
         select_buttons_layout = QHBoxLayout()
-        select_all_btn = QPushButton("เลือกทั้งหมด")
+        select_all_text_th = "เลือกทั้งหมด"
+        select_all_text_en = "Select All"
+        select_all_text = select_all_text_en if current_lang == "EN" else select_all_text_th
+        select_all_btn = QPushButton(select_all_text)
         select_all_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -4523,7 +5129,10 @@ class FreeFootballAnalysisApp(QMainWindow):
                 background-color: #45a049;
             }
         """)
-        clear_all_btn = QPushButton("เอาออกทั้งหมด")
+        clear_all_text_th = "เอาออกทั้งหมด"
+        clear_all_text_en = "Clear All"
+        clear_all_text = clear_all_text_en if current_lang == "EN" else clear_all_text_th
+        clear_all_btn = QPushButton(clear_all_text)
         clear_all_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
@@ -4563,7 +5172,9 @@ class FreeFootballAnalysisApp(QMainWindow):
                 event_name, color, _ = event_data
             else:
                 event_name, color = event_data
-            checkbox = QCheckBox(event_name)
+            # Translate event name for checkbox
+            translated_event_name = t(event_name, event_name)
+            checkbox = QCheckBox(translated_event_name)
             checkbox.setChecked(event_name in self.enabled_events)
             checkbox.setStyleSheet(f"""
                 QCheckBox {{
@@ -4594,7 +5205,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        ok_btn = QPushButton("ตกลง")
+        ok_text_th = "ตกลง"
+        ok_text_en = "OK"
+        ok_text = ok_text_en if current_lang == "EN" else ok_text_th
+        ok_btn = QPushButton(ok_text)
         ok_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -4611,7 +5225,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         ok_btn.clicked.connect(dialog.accept)
         button_layout.addWidget(ok_btn)
         
-        cancel_btn = QPushButton("ยกเลิก")
+        cancel_text_th = "ยกเลิก"
+        cancel_text_en = "Cancel"
+        cancel_text = cancel_text_en if current_lang == "EN" else cancel_text_th
+        cancel_btn = QPushButton(cancel_text)
         cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
@@ -4644,7 +5261,7 @@ class FreeFootballAnalysisApp(QMainWindow):
     def show_manual_tracking_help(self):
         """Show comprehensive help dialog for manual tracking in Thai"""
         dialog = QDialog(self)
-        dialog.setWindowTitle("คู่มือการใช้งาน Manual Tracking")
+        dialog.setWindowTitle(t("คู่มือการใช้งาน Manual Tracking", "Manual Tracking User Guide"))
         dialog.setMinimumSize(900, 700)
         dialog.setStyleSheet("""
             QDialog {
@@ -4678,7 +5295,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         
         # Title
-        title = QLabel("📖 คู่มือการใช้งาน Manual Tracking")
+        title = QLabel(t("📖 คู่มือการใช้งาน Manual Tracking", "📖 Manual Tracking User Guide"))
         title.setStyleSheet("""
             font-weight: bold;
             font-size: 20pt;
@@ -4925,7 +5542,7 @@ class FreeFootballAnalysisApp(QMainWindow):
         credits_layout.setContentsMargins(20, 20, 20, 20)
         
         # Title with better styling
-        about_title = QLabel("👨‍💻 ผู้พัฒนา")
+        about_title = QLabel(t("👨‍💻 ผู้พัฒนา", "👨‍💻 Developer"))
         about_title.setStyleSheet("""
             font-weight: bold;
             font-size: 18pt;
