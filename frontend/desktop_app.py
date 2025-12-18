@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QMessageBox, QSplitter, QFrame, QSlider, QComboBox,
     QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QSpinBox, QListWidget, QListWidgetItem, QDialog, QDialogButtonBox,
-    QGraphicsOpacityEffect
+    QGraphicsOpacityEffect, QStyle
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon
@@ -3521,25 +3521,40 @@ class FreeFootballAnalysisApp(QMainWindow):
         
         # Language toggle button - placed between version and build
         current_lang = self.translation_manager.get_language()
-        self.language_btn = QPushButton(current_lang)
+        # Create language button with clear label and globe icon
+        lang_label_th = "ภาษา:"
+        lang_label_en = "Language:"
+        lang_label = t(lang_label_th, lang_label_en)
+        lang_display = "ไทย" if current_lang == "TH" else "English"
+        self.language_btn = QPushButton(f"🌐 {lang_label} {lang_display}")
         self.language_btn.setCheckable(True)
         self.language_btn.setChecked(current_lang == "TH")
+        
+        # Add tooltip to explain the button
+        tooltip_th = "คลิกเพื่อเปลี่ยนภาษา (Click to change language)"
+        tooltip_en = "Click to change language (คลิกเพื่อเปลี่ยนภาษา)"
+        tooltip_text = t(tooltip_th, tooltip_en)
+        self.language_btn.setToolTip(tooltip_text)
+        
         self.language_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: #8b1538;
                 color: white;
-                border: none;
-                padding: {int(4 * dpi_scale)}px {int(12 * dpi_scale)}px;
-                border-radius: {int(4 * dpi_scale)}px;
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                padding: {int(6 * dpi_scale)}px {int(16 * dpi_scale)}px;
+                border-radius: {int(6 * dpi_scale)}px;
                 font-size: {base_font_info}pt;
                 font-weight: bold;
-                min-width: {int(50 * dpi_scale)}px;
+                min-width: {int(120 * dpi_scale)}px;
             }}
             QPushButton:hover {{
                 background-color: #a01a42;
+                border: 2px solid rgba(255, 255, 255, 0.4);
+                transform: scale(1.05);
             }}
             QPushButton:checked {{
                 background-color: #c41e3a;
+                border: 2px solid rgba(255, 255, 255, 0.6);
             }}
         """)
         self.language_btn.clicked.connect(self.toggle_language)
@@ -3639,9 +3654,19 @@ class FreeFootballAnalysisApp(QMainWindow):
         new_lang = "EN" if current_lang == "TH" else "TH"
         self.translation_manager.set_language(new_lang)
         
-        # Update button text
-        self.language_btn.setText(new_lang)
+        # Update button text with language label and display name
+        lang_label_th = "ภาษา:"
+        lang_label_en = "Language:"
+        lang_label = t(lang_label_th, lang_label_en)
+        lang_display = "ไทย" if new_lang == "TH" else "English"
+        self.language_btn.setText(f"🌐 {lang_label} {lang_display}")
         self.language_btn.setChecked(new_lang == "TH")
+        
+        # Update tooltip
+        tooltip_th = "คลิกเพื่อเปลี่ยนภาษา (Click to change language)"
+        tooltip_en = "Click to change language (คลิกเพื่อเปลี่ยนภาษา)"
+        tooltip_text = t(tooltip_th, tooltip_en)
+        self.language_btn.setToolTip(tooltip_text)
         
         # Refresh all UI text
         self.refresh_ui_text()
