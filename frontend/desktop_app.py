@@ -3576,8 +3576,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         developer_section.addWidget(developer_label)
         
         # Developer Name
-        developer_name = QLabel("นายพัชระ อัลอุมารี")
+        developer_name_text = t("นายพัชระ อัลอุมารี", "Mr.Patchara Al-umaree")
+        developer_name = QLabel(developer_name_text)
         developer_name.setStyleSheet(f"color: #ffffff; font-size: {base_font_info}pt;")
+        self.ui_elements_to_translate[developer_name] = ("นายพัชระ อัลอุมารี", "Mr.Patchara Al-umaree")
         developer_section.addWidget(developer_name)
         
         # Separator
@@ -3734,9 +3736,9 @@ class FreeFootballAnalysisApp(QMainWindow):
                 team2_name = t("ทีม 2", "Team 2")
             current_index = self.team_combo.currentIndex()
             self.team_combo.clear()
-            self.team_combo.addItems([team1_name, team2_name, t("กลาง", "Neutral")])
+            self.team_combo.addItems([team1_name, team2_name])
             # Restore selection if valid
-            if 0 <= current_index < 3:
+            if 0 <= current_index < 2:
                 self.team_combo.setCurrentIndex(current_index)
         
         # Update placeholder texts
@@ -4054,12 +4056,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         team1_combo_en = "Team 1"
         team2_combo_th = "ทีม 2"
         team2_combo_en = "Team 2"
-        neutral_text_th = "กลาง"
-        neutral_text_en = "Neutral"
         team1_combo = team1_combo_en if current_lang == "EN" else team1_combo_th
         team2_combo = team2_combo_en if current_lang == "EN" else team2_combo_th
-        neutral_text = neutral_text_en if current_lang == "EN" else neutral_text_th
-        self.team_combo.addItems([team1_combo, team2_combo, neutral_text])
+        self.team_combo.addItems([team1_combo, team2_combo])
         self.team_combo.setStyleSheet("""
             QComboBox {
                 background-color: #3a3a3a;
@@ -4348,15 +4347,16 @@ class FreeFootballAnalysisApp(QMainWindow):
             self.manual_tracking_data.team_b_name = team2_name
         
         self.team_combo.clear()
-        self.team_combo.addItems([team1_name, team2_name, "กลาง"])
+        self.team_combo.addItems([team1_name, team2_name])
         
         # Try to restore selection
-        if current_selection in [team1_name, "ทีม 1"]:
+        if current_selection in [team1_name, "ทีม 1", "Team 1"]:
             self.team_combo.setCurrentIndex(0)
-        elif current_selection in [team2_name, "ทีม 2"]:
+        elif current_selection in [team2_name, "ทีม 2", "Team 2"]:
             self.team_combo.setCurrentIndex(1)
         else:
-            self.team_combo.setCurrentIndex(2)
+            # Default to first team if selection not found
+            self.team_combo.setCurrentIndex(0)
     
     def on_event_button_clicked(self, event_type: str):
         """Handle event button click - show outcome dialog if needed"""
@@ -4768,16 +4768,8 @@ class FreeFootballAnalysisApp(QMainWindow):
         try:
             current_time = self.manual_video_player.media_player.position() / 1000.0  # Convert to seconds
             team_selection = self.team_combo.currentText()
-            # Use the actual team name from combo box (which is updated with real team names)
-            # Check for "กลาง" in both languages
-            neutral_th = t("กลาง", "Neutral")
-            neutral_en = "Neutral"
-            if team_selection == neutral_th or team_selection == neutral_en:
-                # Store as original Thai key for consistency
-                team = "กลาง"
-            else:
-                # Use the team name directly from combo box (already updated with real names)
-                team = team_selection
+            # Use the team name directly from combo box (already updated with real names)
+            team = team_selection
             
             # Map half selection to numeric value - check both languages
             half_text = self.half_combo.currentText()

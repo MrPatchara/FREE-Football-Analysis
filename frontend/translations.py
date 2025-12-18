@@ -413,8 +413,12 @@ class TranslationManager:
                 if translations.get('TH') == default or translations.get('EN') == default:
                     return translations.get(self.current_language, default)
         
-        # Return original text or default
-        return default if default is not None else text
+        # Return according to current language
+        # text is Thai, default is English
+        if self.current_language == "TH":
+            return text
+        else:
+            return default if default is not None else text
     
     def t(self, text: str, default: Optional[str] = None) -> str:
         """Shortcut for translate()"""
