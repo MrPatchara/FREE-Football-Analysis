@@ -5353,9 +5353,11 @@ class FreeFootballAnalysisApp(QMainWindow):
         content_layout.setContentsMargins(20, 20, 20, 20)
         
         # Section 1: Introduction
-        intro_section = self.create_help_section(
-            "🎯 ภาพรวมการใช้งาน",
-            """
+        intro_title_th = "🎯 ภาพรวมการใช้งาน"
+        intro_title_en = "🎯 Overview"
+        intro_title = t(intro_title_th, intro_title_en)
+        
+        intro_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'>
             <b>Manual Tracking</b> เป็นระบบติดตามเหตุการณ์การแข่งขันฟุตบอลแบบมืออาชีพ 
             ใช้ในการวิเคราะห์การแข่งขันฟุตบอล
@@ -5369,15 +5371,32 @@ class FreeFootballAnalysisApp(QMainWindow):
             5. เล่นวิดีโอและกดปุ่มเหตุการณ์ต่างๆ เมื่อเกิดเหตุการณ์<br>
             6. ส่งออกข้อมูลเป็น Excel หรือ CSV เมื่อเสร็จสิ้น
             </p>
-            """,
-            "#4CAF50"
-        )
+            """
+        intro_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'>
+            <b>Manual Tracking</b> is a professional football match event tracking system 
+            used for match analysis.
+            </p>
+            <p style='font-size: 11pt; line-height: 1.6;'>
+            <b>Usage Steps:</b><br>
+            1. Click the <b style='color: #2196F3;'>Add Video</b> button to load match video<br>
+            2. Set Team 1 and Team 2 names (or use default names)<br>
+            3. Set player list (if needed)<br>
+            4. Select team and half to track<br>
+            5. Play video and click event buttons when events occur<br>
+            6. Export data as Excel or CSV when finished
+            </p>
+            """
+        intro_content = t(intro_content_th, intro_content_en)
+        intro_section = self.create_help_section(intro_title, intro_content, "#4CAF50")
         content_layout.addWidget(intro_section)
         
         # Section 2: Attacking Actions
-        attacking_section = self.create_help_section(
-            "⚽ การโจมตี (Attacking Actions)",
-            """
+        attacking_title_th = "⚽ การโจมตี (Attacking Actions)"
+        attacking_title_en = "⚽ Attacking Actions"
+        attacking_title = t(attacking_title_th, attacking_title_en)
+        
+        attacking_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการโจมตี:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b style='color: #FF9800;'>ยิง</b> - บันทึกการยิงประตู
@@ -5403,15 +5422,44 @@ class FreeFootballAnalysisApp(QMainWindow):
             <li><b style='color: #607D8B;'>ส่งบอลสั้น</b> - บันทึกการส่งบอลสั้น (สำเร็จ/ไม่สำเร็จ)</li>
             <li><b style='color: #FF5722;'>ส่งบอลในเขตโทษ</b> - บันทึกการส่งบอลในเขตโทษ (ผลลัพธ์เหมือนส่งบอล)</li>
             </ul>
-            """,
-            "#FF9800"
-        )
+            """
+        attacking_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Attacking Buttons:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #FF9800;'>Shot</b> - Record shot on goal
+                <ul>
+                <li><b>Goal</b> - Shot scored</li>
+                <li><b>On Target</b> - Shot on target but no goal (counted as successful)</li>
+                <li><b>Off Target</b> - Shot off target</li>
+                <li><b>Blocked</b> - Shot blocked</li>
+                <li><b>Saved</b> - Saved by goalkeeper</li>
+                </ul>
+            </li>
+            <li><b style='color: #2196F3;'>Pass</b> - Record pass
+                <ul>
+                <li><b>Successful</b> - Pass successful</li>
+                <li><b>Unsuccessful</b> - Pass unsuccessful</li>
+                <li><b>Assist</b> - Pass that resulted in goal</li>
+                <li><b>Key Pass</b> - Pass that created shooting opportunity</li>
+                </ul>
+            </li>
+            <li><b style='color: #E91E63;'>Cross</b> - Record cross (outcomes same as pass)</li>
+            <li><b style='color: #9C27B0;'>Through Ball</b> - Record through ball (outcomes same as pass)</li>
+            <li><b style='color: #795548;'>Long Pass</b> - Record long pass (outcomes same as pass)</li>
+            <li><b style='color: #607D8B;'>Short Pass</b> - Record short pass (successful/unsuccessful)</li>
+            <li><b style='color: #FF5722;'>Pass in Penalty Area</b> - Record pass in penalty area (outcomes same as pass)</li>
+            </ul>
+            """
+        attacking_content = t(attacking_content_th, attacking_content_en)
+        attacking_section = self.create_help_section(attacking_title, attacking_content, "#FF9800")
         content_layout.addWidget(attacking_section)
         
         # Section 3: Set Pieces
-        setpieces_section = self.create_help_section(
-            "🎯 ลูกตั้งเตะ (Set Pieces)",
-            """
+        setpieces_title_th = "🎯 ลูกตั้งเตะ (Set Pieces)"
+        setpieces_title_en = "🎯 Set Pieces"
+        setpieces_title = t(setpieces_title_th, setpieces_title_en)
+        
+        setpieces_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มลูกตั้งเตะ:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b style='color: #00BCD4;'>เตะมุม</b> - บันทึกการเตะมุม
@@ -5434,15 +5482,41 @@ class FreeFootballAnalysisApp(QMainWindow):
             </li>
             <li><b style='color: #607D8B;'>ทุ่มบอล</b> - บันทึกการทุ่มบอล (สำเร็จ/ไม่สำเร็จ)</li>
             </ul>
-            """,
-            "#00BCD4"
-        )
+            """
+        setpieces_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Set Piece Buttons:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #00BCD4;'>Corner Kick</b> - Record corner kick
+                <ul>
+                <li><b>Goal</b> - Corner kick resulted in goal</li>
+                <li><b>On Target</b> - Corner kick shot on target</li>
+                <li><b>Off Target</b> - Corner kick shot off target</li>
+                <li><b>Assist</b> - Corner kick resulted in goal</li>
+                <li><b>Key Pass</b> - Corner kick created shooting opportunity</li>
+                <li><b>Cleared</b> - Corner kick cleared</li>
+                </ul>
+            </li>
+            <li><b style='color: #FFC107;'>Free Kick</b> - Record free kick (outcomes same as corner kick)</li>
+            <li><b style='color: #F44336;'>Penalty</b> - Record penalty kick
+                <ul>
+                <li><b>Goal</b> - Penalty scored</li>
+                <li><b>Missed</b> - Penalty missed</li>
+                <li><b>Saved</b> - Penalty saved by goalkeeper</li>
+                </ul>
+            </li>
+            <li><b style='color: #607D8B;'>Throw In</b> - Record throw in (successful/unsuccessful)</li>
+            </ul>
+            """
+        setpieces_content = t(setpieces_content_th, setpieces_content_en)
+        setpieces_section = self.create_help_section(setpieces_title, setpieces_content, "#00BCD4")
         content_layout.addWidget(setpieces_section)
         
         # Section 4: Defensive Actions
-        defensive_section = self.create_help_section(
-            "🛡️ การป้องกัน (Defensive Actions)",
-            """
+        defensive_title_th = "🛡️ การป้องกัน (Defensive Actions)"
+        defensive_title_en = "🛡️ Defensive Actions"
+        defensive_title = t(defensive_title_th, defensive_title_en)
+        
+        defensive_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการป้องกัน:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b style='color: #9C27B0;'>แย่งบอล</b> - บันทึกการแย่งบอล
@@ -5474,15 +5548,50 @@ class FreeFootballAnalysisApp(QMainWindow):
                 </ul>
             </li>
             </ul>
-            """,
-            "#9C27B0"
-        )
+            """
+        defensive_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Defensive Buttons:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #9C27B0;'>Tackle</b> - Record tackle
+                <ul>
+                <li><b>Successful</b> - Tackle successful</li>
+                <li><b>Unsuccessful</b> - Tackle unsuccessful</li>
+                <li><b>Foul</b> - Tackle resulted in foul</li>
+                </ul>
+            </li>
+            <li><b style='color: #9C27B0;'>Interception</b> - Record interception (successful/unsuccessful)</li>
+            <li><b style='color: #795548;'>Clearance</b> - Record clearance
+                <ul>
+                <li><b>Successful</b> - Clearance successful</li>
+                <li><b>Unsuccessful</b> - Clearance unsuccessful</li>
+                <li><b>Dangerous</b> - Dangerous clearance</li>
+                </ul>
+            </li>
+            <li><b style='color: #FF5722;'>Block</b> - Record block
+                <ul>
+                <li><b>Block</b> - Block successful</li>
+                <li><b>Shot Block</b> - Block shot</li>
+                </ul>
+            </li>
+            <li><b style='color: #00BCD4;'>Save</b> - Record goalkeeper save
+                <ul>
+                <li><b>Save</b> - Save successful</li>
+                <li><b>No Save</b> - Could not save</li>
+                <li><b>Important Save</b> - Important save</li>
+                </ul>
+            </li>
+            </ul>
+            """
+        defensive_content = t(defensive_content_th, defensive_content_en)
+        defensive_section = self.create_help_section(defensive_title, defensive_content, "#9C27B0")
         content_layout.addWidget(defensive_section)
         
         # Section 5: Disciplinary
-        disciplinary_section = self.create_help_section(
-            "⚖️ การทำผิดกติกา (Disciplinary)",
-            """
+        disciplinary_title_th = "⚖️ การทำผิดกติกา (Disciplinary)"
+        disciplinary_title_en = "⚖️ Disciplinary"
+        disciplinary_title = t(disciplinary_title_th, disciplinary_title_en)
+        
+        disciplinary_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มการทำผิดกติกา:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b style='color: #F44336;'>ฟาวล์</b> - บันทึกการทำฟาวล์
@@ -5495,15 +5604,31 @@ class FreeFootballAnalysisApp(QMainWindow):
             <li><b style='color: #FFEB3B;'>ใบเหลือง</b> - บันทึกการได้ใบเหลือง</li>
             <li><b style='color: #E91E63;'>ใบแดง</b> - บันทึกการได้ใบแดง</li>
             </ul>
-            """,
-            "#F44336"
-        )
+            """
+        disciplinary_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Disciplinary Buttons:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #F44336;'>Foul</b> - Record foul
+                <ul>
+                <li><b>Foul</b> - Regular foul</li>
+                <li><b>Yellow Card</b> - Foul resulted in yellow card</li>
+                <li><b>Red Card</b> - Foul resulted in red card</li>
+                </ul>
+            </li>
+            <li><b style='color: #FFEB3B;'>Yellow Card</b> - Record yellow card</li>
+            <li><b style='color: #E91E63;'>Red Card</b> - Record red card</li>
+            </ul>
+            """
+        disciplinary_content = t(disciplinary_content_th, disciplinary_content_en)
+        disciplinary_section = self.create_help_section(disciplinary_title, disciplinary_content, "#F44336")
         content_layout.addWidget(disciplinary_section)
         
         # Section 6: Other Events
-        other_section = self.create_help_section(
-            "📋 เหตุการณ์อื่นๆ (Other Events)",
-            """
+        other_title_th = "📋 เหตุการณ์อื่นๆ (Other Events)"
+        other_title_en = "📋 Other Events"
+        other_title = t(other_title_th, other_title_en)
+        
+        other_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>ปุ่มเหตุการณ์อื่นๆ:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b style='color: #9E9E9E;'>ออฟไซด์</b> - บันทึกการออฟไซด์</li>
@@ -5518,15 +5643,33 @@ class FreeFootballAnalysisApp(QMainWindow):
             <li><b style='color: #F44336;'>เสียบอล</b> - บันทึกการเสียบอล</li>
             <li><b style='color: #4CAF50;'>ครองบอล</b> - บันทึกการครองบอล</li>
             </ul>
-            """,
-            "#607D8B"
-        )
+            """
+        other_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Other Event Buttons:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b style='color: #9E9E9E;'>Offside</b> - Record offside</li>
+            <li><b style='color: #607D8B;'>Ball Out</b> - Record ball out of play</li>
+            <li><b style='color: #795548;'>Substitution</b> - Record player substitution
+                <ul>
+                <li><b>Sub In</b> - Player coming in</li>
+                <li><b>Sub Out</b> - Player going out</li>
+                </ul>
+            </li>
+            <li><b style='color: #FF9800;'>Injury</b> - Record injury</li>
+            <li><b style='color: #F44336;'>Lost Ball</b> - Record lost ball</li>
+            <li><b style='color: #4CAF50;'>Possession</b> - Record ball possession</li>
+            </ul>
+            """
+        other_content = t(other_content_th, other_content_en)
+        other_section = self.create_help_section(other_title, other_content, "#607D8B")
         content_layout.addWidget(other_section)
         
         # Section 7: Tips and Best Practices
-        tips_section = self.create_help_section(
-            "💡 เคล็ดลับและแนวทางปฏิบัติ",
-            """
+        tips_title_th = "💡 เคล็ดลับและแนวทางปฏิบัติ"
+        tips_title_en = "💡 Tips and Best Practices"
+        tips_title = t(tips_title_th, tips_title_en)
+        
+        tips_content_th = """
             <p style='font-size: 11pt; line-height: 1.6;'><b>เคล็ดลับการใช้งาน:</b></p>
             <ul style='font-size: 10pt; line-height: 1.8;'>
             <li><b>การบันทึกเวลา:</b> วิดีโอจะหยุดอัตโนมัติเมื่อกดปุ่มเหตุการณ์ เพื่อให้บันทึกเวลาที่แม่นยำ</li>
@@ -5537,9 +5680,21 @@ class FreeFootballAnalysisApp(QMainWindow):
             <li><b>การส่งออก:</b> ส่งออกเป็น Excel เพื่อดูสถิติแบบละเอียด หรือ CSV สำหรับการวิเคราะห์ต่อ</li>
             <li><b>การบันทึกประตู:</b> เมื่อเลือกผลลัพธ์ "ประตู" จะมีหน้าต่างให้กรอกชื่อผู้ยิงและรายละเอียดเพิ่มเติม</li>
             </ul>
-            """,
-            "#FFD700"
-        )
+            """
+        tips_content_en = """
+            <p style='font-size: 11pt; line-height: 1.6;'><b>Usage Tips:</b></p>
+            <ul style='font-size: 10pt; line-height: 1.8;'>
+            <li><b>Time Recording:</b> Video will automatically pause when clicking event buttons to ensure accurate time recording</li>
+            <li><b>Team Naming:</b> You can change team names at any time, and it will update in the event list immediately</li>
+            <li><b>Player List Setup:</b> Set up player list to record player names when goals occur</li>
+            <li><b>Deleting Events:</b> Click on event in table then click "Delete Selected" or double-click to go to that time</li>
+            <li><b>Button Customization:</b> Use "Customize Buttons" button to select which buttons to display</li>
+            <li><b>Exporting:</b> Export as Excel to view detailed statistics, or CSV for further analysis</li>
+            <li><b>Goal Recording:</b> When selecting "Goal" outcome, a window will appear to enter scorer name and additional details</li>
+            </ul>
+            """
+        tips_content = t(tips_content_th, tips_content_en)
+        tips_section = self.create_help_section(tips_title, tips_content, "#FFD700")
         content_layout.addWidget(tips_section)
         
         # Credits section
@@ -5572,7 +5727,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         credits_layout.addWidget(about_title)
         
         # Developer info with better spacing
-        developer_name = QLabel("นายพัชระ อัลอุมารี")
+        developer_name_th = "นายพัชระ อัลอุมารี"
+        developer_name_en = "Mr.Patchara Al-umaree"
+        developer_name_text = t(developer_name_th, developer_name_en)
+        developer_name = QLabel(developer_name_text)
         developer_name.setStyleSheet("""
             font-size: 15pt;
             color: #FFFFFF;
@@ -5598,7 +5756,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         info_layout.setContentsMargins(15, 15, 15, 15)
         
         # Location
-        location_label = QLabel("📍 <b>ที่อยู่:</b> กรุงเทพมหานคร, ประเทศไทย")
+        location_text_th = "📍 <b>ที่อยู่:</b> กรุงเทพมหานคร, ประเทศไทย"
+        location_text_en = "📍 <b>Location:</b> Bangkok, Thailand"
+        location_text = t(location_text_th, location_text_en)
+        location_label = QLabel(location_text)
         location_label.setStyleSheet("""
             font-size: 11pt;
             color: #e0e0e0;
@@ -5610,7 +5771,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         info_layout.addWidget(location_label)
         
         # Email
-        email_label = QLabel('<a href="mailto:Patcharaalumaree@gmail.com" style="color: #2196F3; text-decoration: none;"><b>📧 อีเมล:</b> Patcharaalumaree@gmail.com</a>')
+        email_text_th = '<a href="mailto:Patcharaalumaree@gmail.com" style="color: #2196F3; text-decoration: none;"><b>📧 อีเมล:</b> Patcharaalumaree@gmail.com</a>'
+        email_text_en = '<a href="mailto:Patcharaalumaree@gmail.com" style="color: #2196F3; text-decoration: none;"><b>📧 Email:</b> Patcharaalumaree@gmail.com</a>'
+        email_text = t(email_text_th, email_text_en)
+        email_label = QLabel(email_text)
         email_label.setOpenExternalLinks(True)
         email_label.setTextFormat(Qt.TextFormat.RichText)
         email_label.setStyleSheet("""
@@ -5623,7 +5787,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         info_layout.addWidget(email_label)
         
         # GitHub link
-        github_link = QLabel('<a href="https://github.com/MrPatchara" style="color: #2196F3; text-decoration: none; font-weight: bold;">🔗 <b>โปรไฟล์ GitHub</b></a>')
+        github_text_th = '<a href="https://github.com/MrPatchara" style="color: #2196F3; text-decoration: none; font-weight: bold;">🔗 <b>โปรไฟล์ GitHub</b></a>'
+        github_text_en = '<a href="https://github.com/MrPatchara" style="color: #2196F3; text-decoration: none; font-weight: bold;">🔗 <b>GitHub Profile</b></a>'
+        github_text = t(github_text_th, github_text_en)
+        github_link = QLabel(github_text)
         github_link.setOpenExternalLinks(True)
         github_link.setTextFormat(Qt.TextFormat.RichText)
         github_link.setStyleSheet("""
@@ -5645,7 +5812,10 @@ class FreeFootballAnalysisApp(QMainWindow):
         layout.addWidget(scroll)
         
         # Close button
-        close_btn = QPushButton("ปิด")
+        close_btn_text_th = "ปิด"
+        close_btn_text_en = "Close"
+        close_btn_text = t(close_btn_text_th, close_btn_text_en)
+        close_btn = QPushButton(close_btn_text)
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
         
