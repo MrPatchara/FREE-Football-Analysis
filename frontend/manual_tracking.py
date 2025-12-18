@@ -475,17 +475,17 @@ class ManualTrackingData:
         
         # === ส่วนที่ 1: สรุปภาพรวม ===
         summary_data.append({
-            self._t('หมวดหมู่', 'หมวดหมู่'): self._t('ภาพรวม', 'ภาพรวม'),
-            self._t('รายการ', 'รายการ'): self._t('จำนวนเหตุการณ์ทั้งหมด', 'จำนวนเหตุการณ์ทั้งหมด'),
-            self._t('จำนวน', 'จำนวน'): total_events,
-            self._t('หมายเหตุ', 'หมายเหตุ'): self._t('รวมทุกทีมและทุกประเภทเหตุการณ์', 'รวมทุกทีมและทุกประเภทเหตุการณ์')
+            self._t('หมวดหมู่', 'Category'): self._t('ภาพรวม', 'Overview'),
+            self._t('รายการ', 'Item'): self._t('จำนวนเหตุการณ์ทั้งหมด', 'Total Events'),
+            self._t('จำนวน', 'Count'): total_events,
+            self._t('หมายเหตุ', 'Note'): self._t('รวมทุกทีมและทุกประเภทเหตุการณ์', 'All teams and all event types')
         })
         
         summary_data.append({
-            self._t('หมวดหมู่', 'หมวดหมู่'): self._t('ภาพรวม', 'ภาพรวม'),
-            self._t('รายการ', 'รายการ'): self._t('จำนวนทีมที่วิเคราะห์', 'จำนวนทีมที่วิเคราะห์'),
-            self._t('จำนวน', 'จำนวน'): len(teams),
-            self._t('หมายเหตุ', 'หมายเหตุ'): ', '.join(teams) if teams else self._t('ไม่มีทีม', 'ไม่มีทีม')
+            self._t('หมวดหมู่', 'Category'): self._t('ภาพรวม', 'Overview'),
+            self._t('รายการ', 'Item'): self._t('จำนวนทีมที่วิเคราะห์', 'Number of Teams Analyzed'),
+            self._t('จำนวน', 'Count'): len(teams),
+            self._t('หมายเหตุ', 'Note'): ', '.join(teams) if teams else self._t('ไม่มีทีม', 'No Teams')
         })
         
         # === ส่วนที่ 2: สรุปตามประเภทเหตุการณ์ ===
@@ -553,10 +553,10 @@ class ManualTrackingData:
             translated_event_type = self._t(event_type, event_type)
             
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('ประเภทเหตุการณ์', 'ประเภทเหตุการณ์'),
-                self._t('รายการ', 'รายการ'): translated_event_type,
-                self._t('จำนวน', 'จำนวน'): event_total,
-                self._t('หมายเหตุ', 'หมายเหตุ'): f"{self._t('แบ่งตามทีม:', 'แบ่งตามทีม:')} {team_counts}" if team_counts else self._t('ไม่มีข้อมูลทีม', 'ไม่มีข้อมูลทีม')
+                self._t('หมวดหมู่', 'Category'): self._t('ประเภทเหตุการณ์', 'Event Type'),
+                self._t('รายการ', 'Item'): translated_event_type,
+                self._t('จำนวน', 'Count'): event_total,
+                self._t('หมายเหตุ', 'Note'): f"{self._t('แบ่งตามทีม:', 'By Team:')} {team_counts}" if team_counts else self._t('ไม่มีข้อมูลทีม', 'No Team Data')
             })
             
             # Add outcome details
@@ -574,10 +574,10 @@ class ManualTrackingData:
                 translated_outcome = self._t(outcome, outcome)
                 
                 summary_data.append({
-                    self._t('หมวดหมู่', 'หมวดหมู่'): f'  └─ {translated_event_type}',
-                    self._t('รายการ', 'รายการ'): f"{self._t('ผลลัพธ์:', 'ผลลัพธ์:')} {translated_outcome}",
-                    self._t('จำนวน', 'จำนวน'): outcome_count,
-                    self._t('หมายเหตุ', 'หมายเหตุ'): f"{self._t('แบ่งตามทีม:', 'แบ่งตามทีม:')} {team_breakdown}" if team_breakdown else '-'
+                    self._t('หมวดหมู่', 'Category'): f'  └─ {translated_event_type}',
+                    self._t('รายการ', 'Item'): f"{self._t('ผลลัพธ์:', 'Outcome:')} {translated_outcome}",
+                    self._t('จำนวน', 'Count'): outcome_count,
+                    self._t('หมายเหตุ', 'Note'): f"{self._t('แบ่งตามทีม:', 'By Team:')} {team_breakdown}" if team_breakdown else '-'
                 })
             
             # Add success rate info (คำนวณจาก attempts ที่มีผลสำเร็จ/ไม่สำเร็จเท่านั้น)
@@ -588,19 +588,19 @@ class ManualTrackingData:
                 failed_text = self._t("ไม่สำเร็จ", "Failed")
                 rate_text = self._t("อัตรา", "Rate")
                 summary_data.append({
-                    self._t('หมวดหมู่', 'หมวดหมู่'): f'  └─ {translated_event_type}',
-                    self._t('รายการ', 'รายการ'): self._t('อัตราความสำเร็จ', 'Success Rate'),
-                    self._t('จำนวน', 'จำนวน'): f"{stats['successful']}/{attempts}",
-                    self._t('หมายเหตุ', 'หมายเหตุ'): f'{success_text}: {stats["successful"]}, {failed_text}: {stats["unsuccessful"]}, {rate_text}: {success_rate:.1f}%'
+                    self._t('หมวดหมู่', 'Category'): f'  └─ {translated_event_type}',
+                    self._t('รายการ', 'Item'): self._t('อัตราความสำเร็จ', 'Success Rate'),
+                    self._t('จำนวน', 'Count'): f"{stats['successful']}/{attempts}",
+                    self._t('หมายเหตุ', 'Note'): f'{success_text}: {stats["successful"]}, {failed_text}: {stats["unsuccessful"]}, {rate_text}: {success_rate:.1f}%'
                 })
             elif stats['successful'] > 0:
                 # กรณีที่ไม่มี unsuccessful แต่มี successful (เช่น ประตู)
                 success_text = self._t("สำเร็จ", "Success")
                 summary_data.append({
-                    self._t('หมวดหมู่', 'หมวดหมู่'): f'  └─ {translated_event_type}',
-                    self._t('รายการ', 'รายการ'): self._t('อัตราความสำเร็จ', 'Success Rate'),
-                    self._t('จำนวน', 'จำนวน'): f"{stats['successful']}/{stats['successful']}",
-                    self._t('หมายเหตุ', 'หมายเหตุ'): f'{success_text}: {stats["successful"]} (100%)'
+                    self._t('หมวดหมู่', 'Category'): f'  └─ {translated_event_type}',
+                    self._t('รายการ', 'Item'): self._t('อัตราความสำเร็จ', 'Success Rate'),
+                    self._t('จำนวน', 'Count'): f"{stats['successful']}/{stats['successful']}",
+                    self._t('หมายเหตุ', 'Note'): f'{success_text}: {stats["successful"]} (100%)'
                 })
         
         # === ส่วนที่ 3: สรุปตามทีม ===
@@ -609,10 +609,10 @@ class ManualTrackingData:
             team_total = len(team_events)
             
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สรุปตามทีม', 'Team Summary'),
-                self._t('รายการ', 'รายการ'): f'{team} - {self._t("รวมทั้งหมด", "Total")}',
-                self._t('จำนวน', 'จำนวน'): team_total,
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{self._t("จากทั้งหมด", "From Total")} {total_events} {self._t("เหตุการณ์", "Events")}'
+                self._t('หมวดหมู่', 'Category'): self._t('สรุปตามทีม', 'Team Summary'),
+                self._t('รายการ', 'Item'): f'{team} - {self._t("รวมทั้งหมด", "Total")}',
+                self._t('จำนวน', 'Count'): team_total,
+                self._t('หมายเหตุ', 'Note'): f'{self._t("จากทั้งหมด", "From Total")} {total_events} {self._t("เหตุการณ์", "Events")}'
             })
             
             # Team events by type
@@ -654,19 +654,19 @@ class ManualTrackingData:
                     from_team_text = self._t("จาก", "From")
                     team_events_text = self._t("เหตุการณ์ของทีม", "Team Events")
                     summary_data.append({
-                        self._t('หมวดหมู่', 'หมวดหมู่'): f'  └─ {team}',
-                        self._t('รายการ', 'รายการ'): f'{translated_event_type} ({self._t("อัตราความสำเร็จ", "Success Rate")}: {team_rate:.1f}%)',
-                        self._t('จำนวน', 'จำนวน'): count,
-                        self._t('หมายเหตุ', 'หมายเหตุ'): f'{success_text}: {team_successful}/{team_attempts}, {from_team_text} {team_total} {team_events_text}'
+                        self._t('หมวดหมู่', 'Category'): f'  └─ {team}',
+                        self._t('รายการ', 'Item'): f'{translated_event_type} ({self._t("อัตราความสำเร็จ", "Success Rate")}: {team_rate:.1f}%)',
+                        self._t('จำนวน', 'Count'): count,
+                        self._t('หมายเหตุ', 'Note'): f'{success_text}: {team_successful}/{team_attempts}, {from_team_text} {team_total} {team_events_text}'
                     })
                 else:
                     from_team_text = self._t("จาก", "From")
                     team_events_text = self._t("เหตุการณ์ของทีม", "Team Events")
                     summary_data.append({
-                        self._t('หมวดหมู่', 'หมวดหมู่'): f'  └─ {team}',
-                        self._t('รายการ', 'รายการ'): translated_event_type,
-                        self._t('จำนวน', 'จำนวน'): count,
-                        self._t('หมายเหตุ', 'หมายเหตุ'): f'{from_team_text} {team_total} {team_events_text}'
+                        self._t('หมวดหมู่', 'Category'): f'  └─ {team}',
+                        self._t('รายการ', 'Item'): translated_event_type,
+                        self._t('จำนวน', 'Count'): count,
+                        self._t('หมายเหตุ', 'Note'): f'{from_team_text} {team_total} {team_events_text}'
                     })
         
         # === ส่วนที่ 4: สถิติเบื้องต้น ===
@@ -680,25 +680,25 @@ class ManualTrackingData:
             
             seconds_text = self._t("วินาที", "seconds")
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติเวลา', 'Time Statistics'),
-                self._t('รายการ', 'รายการ'): self._t('เวลาตั้งแต่แรก', 'First Time'),
-                self._t('จำนวน', 'จำนวน'): f"{int(min_time // 60)}:{int(min_time % 60):02d}",
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{min_time:.1f} {seconds_text}'
+                self._t('หมวดหมู่', 'Category'): self._t('สถิติเวลา', 'Time Statistics'),
+                self._t('รายการ', 'Item'): self._t('เวลาตั้งแต่แรก', 'First Time'),
+                self._t('จำนวน', 'Count'): f"{int(min_time // 60)}:{int(min_time % 60):02d}",
+                self._t('หมายเหตุ', 'Note'): f'{min_time:.1f} {seconds_text}'
             })
             
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติเวลา', 'Time Statistics'),
-                self._t('รายการ', 'รายการ'): self._t('เวลาสุดท้าย', 'Last Time'),
-                self._t('จำนวน', 'จำนวน'): f"{int(max_time // 60)}:{int(max_time % 60):02d}",
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{max_time:.1f} {seconds_text}'
+                self._t('หมวดหมู่', 'Category'): self._t('สถิติเวลา', 'Time Statistics'),
+                self._t('รายการ', 'Item'): self._t('เวลาสุดท้าย', 'Last Time'),
+                self._t('จำนวน', 'Count'): f"{int(max_time // 60)}:{int(max_time % 60):02d}",
+                self._t('หมายเหตุ', 'Note'): f'{max_time:.1f} {seconds_text}'
             })
             
             minutes_text = self._t("นาที", "minutes")
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติเวลา', 'Time Statistics'),
-                self._t('รายการ', 'รายการ'): self._t('ระยะเวลารวม', 'Total Duration'),
-                self._t('จำนวน', 'จำนวน'): f"{int(total_duration // 60)}:{int(total_duration % 60):02d}",
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{total_duration:.1f} {seconds_text} ({total_minutes:.2f} {minutes_text})'
+                self._t('หมวดหมู่', 'Category'): self._t('สถิติเวลา', 'Time Statistics'),
+                self._t('รายการ', 'Item'): self._t('ระยะเวลารวม', 'Total Duration'),
+                self._t('จำนวน', 'Count'): f"{int(total_duration // 60)}:{int(total_duration % 60):02d}",
+                self._t('หมายเหตุ', 'Note'): f'{total_duration:.1f} {seconds_text} ({total_minutes:.2f} {minutes_text})'
             })
             
             # Average events per minute
@@ -706,10 +706,10 @@ class ManualTrackingData:
             avg_text = self._t("เฉลี่ย", "Average")
             events_per_min_text = self._t("เหตุการณ์/นาที", "Events/Minute")
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติเวลา', 'Time Statistics'),
-                self._t('รายการ', 'รายการ'): self._t('จำนวนเหตุการณ์ต่อนาที', 'Events per Minute'),
-                self._t('จำนวน', 'จำนวน'): f"{events_per_minute:.2f}",
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{avg_text} {events_per_minute:.2f} {events_per_min_text}'
+                self._t('หมวดหมู่', 'Category'): self._t('สถิติเวลา', 'Time Statistics'),
+                self._t('รายการ', 'Item'): self._t('จำนวนเหตุการณ์ต่อนาที', 'Events per Minute'),
+                self._t('จำนวน', 'Count'): f"{events_per_minute:.2f}",
+                self._t('หมายเหตุ', 'Note'): f'{avg_text} {events_per_minute:.2f} {events_per_min_text}'
             })
             
             # Calculate time intervals between events
@@ -718,10 +718,10 @@ class ManualTrackingData:
                 avg_interval = sum(intervals) / len(intervals) if intervals else 0
                 avg_per_event_text = self._t("วินาทีต่อเหตุการณ์", "seconds per event")
                 summary_data.append({
-                    self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติเวลา', 'Time Statistics'),
-                    self._t('รายการ', 'รายการ'): self._t('ช่วงเวลาระหว่างเหตุการณ์ (เฉลี่ย)', 'Average Interval Between Events'),
-                    self._t('จำนวน', 'จำนวน'): f"{avg_interval:.1f} {seconds_text}",
-                    self._t('หมายเหตุ', 'หมายเหตุ'): f'{avg_text} {avg_interval:.1f} {avg_per_event_text}'
+                    self._t('หมวดหมู่', 'Category'): self._t('สถิติเวลา', 'Time Statistics'),
+                    self._t('รายการ', 'Item'): self._t('ช่วงเวลาระหว่างเหตุการณ์ (เฉลี่ย)', 'Average Interval Between Events'),
+                    self._t('จำนวน', 'Count'): f"{avg_interval:.1f} {seconds_text}",
+                    self._t('หมายเหตุ', 'Note'): f'{avg_text} {avg_interval:.1f} {avg_per_event_text}'
                 })
         
         # Calculate half distribution
@@ -743,10 +743,10 @@ class ManualTrackingData:
         for half_num, count in sorted(half_counts.items()):
             half_name = half_names.get(half_num, f"{self._t('ครึ่ง', 'Half')} {half_num}")
             summary_data.append({
-                self._t('หมวดหมู่', 'หมวดหมู่'): self._t('สถิติตามครึ่ง', 'Half Statistics'),
-                self._t('รายการ', 'รายการ'): half_name,
-                self._t('จำนวน', 'จำนวน'): count,
-                self._t('หมายเหตุ', 'หมายเหตุ'): f'{from_total_text} {total_events} {events_text}'
+                self._t('หมวดหมู่', 'Category'): self._t('สถิติตามครึ่ง', 'Half Statistics'),
+                self._t('รายการ', 'Item'): half_name,
+                self._t('จำนวน', 'Count'): count,
+                self._t('หมายเหตุ', 'Note'): f'{from_total_text} {total_events} {events_text}'
             })
         
         df_summary = pd.DataFrame(summary_data)
@@ -811,12 +811,12 @@ class ManualTrackingData:
             
             for e in team_a_events:
                 if e.event_type == event_type:
-                    outcome = e.outcome if e.outcome else "ไม่มีผลลัพธ์"
+                    outcome = e.outcome if e.outcome else self._t("ไม่มีผลลัพธ์", "No Result")
                     team_a_outcomes[outcome] = team_a_outcomes.get(outcome, 0) + 1
             
             for e in team_b_events:
                 if e.event_type == event_type:
-                    outcome = e.outcome if e.outcome else "ไม่มีผลลัพธ์"
+                    outcome = e.outcome if e.outcome else self._t("ไม่มีผลลัพธ์", "No Result")
                     team_b_outcomes[outcome] = team_b_outcomes.get(outcome, 0) + 1
             
             # Compare each outcome
@@ -826,12 +826,16 @@ class ManualTrackingData:
                 b_count = team_b_outcomes.get(outcome, 0)
                 diff = a_count - b_count
                 
+                # Translate event_type and outcome for display
+                translated_event_type = self._t(event_type, event_type)
+                translated_outcome = self._t(outcome, outcome)
+                
                 comparison_data.append({
-                    'ตัวแปร': f'  └─ {event_type} - {outcome}',
+                    self._t('ตัวแปร', 'Variable'): f'  └─ {translated_event_type} - {translated_outcome}',
                     team_a: a_count,
                     team_b: b_count,
-                    'ความแตกต่าง': diff,
-                    'ทีมที่มากกว่า': team_a if diff > 0 else (team_b if diff < 0 else 'เท่ากัน')
+                    self._t('ความแตกต่าง', 'Difference'): diff,
+                    self._t('ทีมที่มากกว่า', 'Team with More'): team_a if diff > 0 else (team_b if diff < 0 else equal_text)
                 })
         
         # === ส่วนที่ 3: เปรียบเทียบอัตราความสำเร็จ ===
@@ -973,9 +977,20 @@ class ManualTrackingData:
         # Translate column headers if DataFrame is not empty
         if not df_comparison.empty and len(df_comparison.columns) > 0:
             # Get translated column names
+            # Only translate standard column names, keep team names as-is
             translated_columns = []
+            standard_columns = {
+                'ตัวแปร': 'Variable',
+                'ความแตกต่าง': 'Difference',
+                'ทีมที่มากกว่า': 'Team with More'
+            }
             for col in df_comparison.columns:
-                translated_columns.append(self._t(col, col))
+                # If it's a standard column, translate it
+                if col in standard_columns:
+                    translated_columns.append(self._t(col, standard_columns[col]))
+                else:
+                    # Keep team names and other columns as-is
+                    translated_columns.append(col)
             df_comparison.columns = translated_columns
         return df_comparison
     
@@ -1076,26 +1091,28 @@ class ManualTrackingData:
             minutes = int(event.timestamp // 60)
             seconds = int(event.timestamp % 60)
             half_names = {
-                1: "ครึ่งแรก",
-                2: "ครึ่งหลัง",
-                3: "ต่อเวลาครึ่งแรก",
-                4: "ต่อเวลาครึ่งหลัง"
+                1: self._t("ครึ่งแรก", "First Half"),
+                2: self._t("ครึ่งหลัง", "Second Half"),
+                3: self._t("ต่อเวลาครึ่งแรก", "Extra Time First Half"),
+                4: self._t("ต่อเวลาครึ่งหลัง", "Extra Time Second Half")
             }
             
             timeline_data.append({
-                self._t('เวลา', 'เวลา'): f"{minutes:02d}:{seconds:02d}",
-                self._t('เวลา (วินาที)', 'เวลา (วินาที)'): event.timestamp,
-                self._t('ครึ่ง', 'ครึ่ง'): half_names.get(event.half, f"{self._t('ครึ่ง', 'ครึ่ง')} {event.half}"),
-                self._t('เหตุการณ์', 'เหตุการณ์'): self._t(event.event_type, event.event_type),
-                self._t('ผลลัพธ์', 'ผลลัพธ์'): self._t(event.outcome, event.outcome) if event.outcome else '-',
-                self._t('ทีม', 'ทีม'): self._t(event.team, event.team) if event.team else '-',
-                self._t('หมายเลขผู้เล่น', 'หมายเลขผู้เล่น'): event.player_number if event.player_number else '-',
-                self._t('ชื่อผู้เล่น', 'ชื่อผู้เล่น'): event.player_name if event.player_name else '-',
-                self._t('คำอธิบาย', 'คำอธิบาย'): event.description if event.description else '-'
+                self._t('เวลา', 'Time'): f"{minutes:02d}:{seconds:02d}",
+                self._t('เวลา (วินาที)', 'Time (Seconds)'): event.timestamp,
+                self._t('ครึ่ง', 'Half'): half_names.get(event.half, f"{self._t('ครึ่ง', 'Half')} {event.half}"),
+                self._t('เหตุการณ์', 'Event'): self._t(event.event_type, event.event_type),
+                self._t('ผลลัพธ์', 'Outcome'): self._t(event.outcome, event.outcome) if event.outcome else '-',
+                self._t('ทีม', 'Team'): self._t(event.team, event.team) if event.team else '-',
+                self._t('หมายเลขผู้เล่น', 'Player Number'): event.player_number if event.player_number else '-',
+                self._t('ชื่อผู้เล่น', 'Player Name'): event.player_name if event.player_name else '-',
+                self._t('คำอธิบาย', 'Description'): event.description if event.description else '-'
             })
         
         df_timeline = pd.DataFrame(timeline_data)
-        timeline_sheet = self._t('ไทม์ไลน์', 'ไทม์ไลน์')
+        # Get current language to determine sheet name
+        current_lang = self._get_current_language()
+        timeline_sheet = "Timeline" if current_lang == "EN" else "ไทม์ไลน์"
         df_timeline.to_excel(writer, sheet_name=timeline_sheet, index=False)
     
     def _add_key_moments_sheet(self, writer):
@@ -1180,6 +1197,10 @@ class ManualTrackingData:
         if not self.events:
             return
         
+        # Get current language to determine sheet name
+        current_lang = self._get_current_language()
+        event_freq_sheet = "Event Frequency" if current_lang == "EN" else "ความถี่เหตุการณ์"
+        
         # Get time range
         times = [e.timestamp for e in self.events]
         if not times:
@@ -1216,10 +1237,10 @@ class ManualTrackingData:
                 event_counts[event_type] = event_counts.get(event_type, 0) + 1
             
             period_data = {
-                'ช่วงเวลา': f"{int(period_start // 60)}:00 - {int(period_end // 60)}:00",
-                'เวลาเริ่มต้น (นาที)': int(period_start // 60),
-                'เวลาสิ้นสุด (นาที)': int(period_end // 60),
-                'จำนวนเหตุการณ์ทั้งหมด': len(period_events)
+                self._t('ช่วงเวลา', 'Time Period'): f"{int(period_start // 60)}:00 - {int(period_end // 60)}:00",
+                self._t('เวลาเริ่มต้น (นาที)', 'Start Time (Minutes)'): int(period_start // 60),
+                self._t('เวลาสิ้นสุด (นาที)', 'End Time (Minutes)'): int(period_end // 60),
+                self._t('จำนวนเหตุการณ์ทั้งหมด', 'Total Events'): len(period_events)
             }
             
             # Add counts for tracked event types
@@ -1233,7 +1254,7 @@ class ManualTrackingData:
         
         if periods:
             df_frequency = pd.DataFrame(periods)
-            df_frequency.to_excel(writer, sheet_name='ความถี่เหตุการณ์', index=False)
+            df_frequency.to_excel(writer, sheet_name=event_freq_sheet, index=False)
     
     def _add_set_pieces_sheet(self, writer):
         """Add set pieces summary (corners, free kicks, penalties)"""
