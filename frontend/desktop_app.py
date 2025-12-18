@@ -24,6 +24,9 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 # Get the project root directory
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+# Path to title icon
+TITLE_ICON_PATH = os.path.join(os.path.dirname(__file__), "title.png")
+
 # Add parent directory to path to import main module
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -591,6 +594,9 @@ class FreeFootballAnalysisApp(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle(t("FREE - Football Analysis", "FREE - Football Analysis"))
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            self.setWindowIcon(QIcon(TITLE_ICON_PATH))
         # Make window responsive - use percentage-based sizing
         self.setMinimumSize(1000, 600)
         
@@ -4413,6 +4419,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{t('เลือกผลลัพธ์ -', 'Select outcome for:')} {t(event_type, event_type)}")
         dialog.setMinimumSize(300, 200)
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            dialog.setWindowIcon(QIcon(TITLE_ICON_PATH))
         dialog.setStyleSheet("""
             QDialog {
                 background-color: #1e1e1e;
@@ -4490,6 +4499,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         dialog = QDialog(self)
         set_players_title = t(f"ตั้งค่ารายชื่อทีม {team_num}", f"Set Team {team_num} Players")
         dialog.setWindowTitle(set_players_title)
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            dialog.setWindowIcon(QIcon(TITLE_ICON_PATH))
         dialog.setMinimumSize(600, 500)
         dialog.setStyleSheet("""
             QDialog {
@@ -4647,6 +4659,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(t("บันทึกประตู", "Save Goal"))
         dialog.setMinimumSize(350, 200)
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            dialog.setWindowIcon(QIcon(TITLE_ICON_PATH))
         dialog.setStyleSheet("""
             QDialog {
                 background-color: #1e1e1e;
@@ -5083,6 +5098,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         dialog = QDialog(self)
         dialog_title_th = "ปรับแต่งปุ่มติดตาม"
         dialog_title_en = "Customize Tracking Buttons"
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            dialog.setWindowIcon(QIcon(TITLE_ICON_PATH))
         dialog.setWindowTitle(dialog_title_en if current_lang == "EN" else dialog_title_th)
         dialog.setMinimumSize(400, 500)
         dialog.setStyleSheet("""
@@ -5279,6 +5297,9 @@ class FreeFootballAnalysisApp(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(t("คู่มือการใช้งาน Manual Tracking", "Manual Tracking User Guide"))
         dialog.setMinimumSize(900, 700)
+        # Set window icon
+        if os.path.exists(TITLE_ICON_PATH):
+            dialog.setWindowIcon(QIcon(TITLE_ICON_PATH))
         dialog.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
