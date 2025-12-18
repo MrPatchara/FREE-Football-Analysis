@@ -3550,7 +3550,6 @@ class FreeFootballAnalysisApp(QMainWindow):
             QPushButton:hover {{
                 background-color: #a01a42;
                 border: 2px solid rgba(255, 255, 255, 0.4);
-                transform: scale(1.05);
             }}
             QPushButton:checked {{
                 background-color: #c41e3a;
