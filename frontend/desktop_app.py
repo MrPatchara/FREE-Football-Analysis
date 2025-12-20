@@ -22,10 +22,33 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 # Get the project root directory
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Path to title icon
-TITLE_ICON_PATH = os.path.join(os.path.dirname(__file__), "title.png")
+# Handle PyInstaller bundle mode and Nuitka bundle mode
+if hasattr(sys, '_MEIPASS'):
+    # PyInstaller bundle mode
+    PROJECT_ROOT = sys._MEIPASS
+    EXE_DIR = os.path.dirname(sys.executable)  # Directory where executable is located
+    # Path to title icon in bundle
+    TITLE_ICON_PATH = os.path.join(PROJECT_ROOT, 'frontend', 'title.png')
+elif getattr(sys, 'frozen', False):
+    # Nuitka bundle mode (or other frozen executables)
+    # In Nuitka, the executable directory contains all files
+    # Check if we're in a .dist directory (Nuitka's output structure)
+    exe_path = sys.executable
+    exe_dir = os.path.dirname(exe_path)
+    # Nuitka typically creates a .dist directory
+    if exe_dir.endswith('.dist') or os.path.basename(exe_dir).endswith('.dist'):
+        EXE_DIR = exe_dir
+        PROJECT_ROOT = exe_dir
+    else:
+        EXE_DIR = exe_dir
+        PROJECT_ROOT = exe_dir
+    # Path to title icon in bundle
+    TITLE_ICON_PATH = os.path.join(PROJECT_ROOT, 'frontend', 'title.png')
+else:
+    # Development mode
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    EXE_DIR = PROJECT_ROOT  # In dev mode, use PROJECT_ROOT
+    TITLE_ICON_PATH = os.path.join(os.path.dirname(__file__), "title.png")
 
 # Add parent directory to path to import main module
 if PROJECT_ROOT not in sys.path:
@@ -36,14 +59,16 @@ from main import process_video
 # Import manual tracking module
 try:
     from frontend.manual_tracking import ManualTrackingData, TrackingEvent
-except ImportError:
+except ImportError as e:
     # If import fails, create dummy classes
+    import sys
+    print(f"Warning: Could not import frontend.manual_tracking: {e}", file=sys.stderr)
+    print(f"Warning: Using dummy classes for ManualTrackingData and TrackingEvent", file=sys.stderr)
     class ManualTrackingData:
         def __init__(self):
             self.events = []
     class TrackingEvent:
         pass
-from frontend.manual_tracking import ManualTrackingData, TrackingEvent
 from frontend.translations import get_translation_manager, t
 
 
@@ -64,6 +89,8 @@ class VideoProcessingThread(QThread):
     def run(self):
         try:
             from frontend.translations import t
+            import traceback
+            
             self.progress.emit(t("กำลังประมวลผลวิดีโอ...", "กำลังประมวลผลวิดีโอ..."))
             # Reset logs before processing
             self.reset_logs()
@@ -75,6 +102,9 @@ class VideoProcessingThread(QThread):
             self.finished.emit(True, output_path)
         except Exception as e:
             from frontend.translations import t
+            import traceback
+            error_msg = f"{t('เกิดข้อผิดพลาด:', 'เกิดข้อผิดพลาด:')} {str(e)}\n{traceback.format_exc()}"
+            print(f"Error in VideoProcessingThread: {error_msg}", flush=True)
             self.progress.emit(f"{t('เกิดข้อผิดพลาด:', 'เกิดข้อผิดพลาด:')} {str(e)}")
             self.finished.emit(False, "")
     
@@ -499,6 +529,13 @@ class PreviewVideoWidget(QWidget):
 class FreeFootballAnalysisApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        # Ensure output directory exists
+        output_dir = os.path.join(EXE_DIR, "output")
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Warning: Could not create output directory {output_dir}: {e}")
+        
         self.video_path: Optional[str] = None
         self.demo_video: Optional[str] = None
         self.processed = False
@@ -2673,7 +2710,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 save_heat_map_title,
-                os.path.join(PROJECT_ROOT, "output", default_filename),
+                os.path.join(EXE_DIR, "output", default_filename),
                 "PNG Files (*.png);;All Files (*)"
             )
             
@@ -3043,7 +3080,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 save_movement_title,
-                os.path.join(PROJECT_ROOT, "output", default_filename),
+                os.path.join(EXE_DIR, "output", default_filename),
                 "PNG Files (*.png);;All Files (*)"
             )
             
@@ -3229,18 +3266,25 @@ class FreeFootballAnalysisApp(QMainWindow):
         if checked:
             sender = self.sender()
             if sender == self.radio_demo1:
-                self.demo_video = os.path.join(PROJECT_ROOT, "demos", "demo1.mp4")
+                # In PyInstaller bundle, demos are in _MEIPASS/demos
+                # In dev mode, demos are in PROJECT_ROOT/demos
+                demo_path = os.path.join(PROJECT_ROOT, "demos", "demo1.mp4")
+                self.demo_video = demo_path
                 self.video_path = None
             elif sender == self.radio_demo2:
-                self.demo_video = os.path.join(PROJECT_ROOT, "demos", "demo2.mp4")
+                demo_path = os.path.join(PROJECT_ROOT, "demos", "demo2.mp4")
+                self.demo_video = demo_path
                 self.video_path = None
             
-            if os.path.exists(self.demo_video):
+            if self.demo_video and os.path.exists(self.demo_video):
                 self.selected_video_label.setText("")
                 self.preview_video.load_video(self.demo_video)
                 self.btn_start.setEnabled(True)
             else:
-                self.selected_video_label.setText(t("ไม่พบไฟล์วิดีโอ", "Video file not found"))
+                error_msg = t("ไม่พบไฟล์วิดีโอ", "Video file not found")
+                if self.demo_video:
+                    error_msg += f": {self.demo_video}"
+                self.selected_video_label.setText(error_msg)
                 self.btn_start.setEnabled(False)
     
     def browse_video(self):
@@ -3338,7 +3382,7 @@ class FreeFootballAnalysisApp(QMainWindow):
                 self.tabs.setCurrentIndex(2)  # Video Preview tab
             else:
                 # Fallback to old path
-                output_path = os.path.join(PROJECT_ROOT, "output", "output.mp4")
+                output_path = os.path.join(EXE_DIR, "output", "output.mp4")
                 if os.path.exists(output_path):
                     self.result_video_player.load_video(output_path)
                     self.btn_open_output.setEnabled(True)
@@ -3352,7 +3396,7 @@ class FreeFootballAnalysisApp(QMainWindow):
     
     def open_video_file(self):
         """Open video file dialog and load selected video in player"""
-        output_folder = os.path.join(PROJECT_ROOT, "output")
+        output_folder = os.path.join(EXE_DIR, "output")
         
         # Create output folder if it doesn't exist
         if not os.path.exists(output_folder):
@@ -3385,7 +3429,7 @@ class FreeFootballAnalysisApp(QMainWindow):
             QMessageBox.warning(self, t("ไม่พบไฟล์", "File Not Found"), f"{t('ไม่พบไฟล์วิดีโอ:', 'Video file not found:')} {video_path}")
     
     def open_output_folder(self):
-        output_folder = os.path.join(PROJECT_ROOT, "output")
+        output_folder = os.path.join(EXE_DIR, "output")
         if os.path.exists(output_folder):
             if sys.platform == "win32":
                 os.startfile(output_folder)
@@ -5880,13 +5924,81 @@ class FreeFootballAnalysisApp(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # Modern look
-    
-    window = FreeFootballAnalysisApp()
-    window.show()
-    
-    sys.exit(app.exec())
+    """Main entry point for the desktop application"""
+    try:
+        # Configure Qt plugin path for PyInstaller and Nuitka bundles
+        # This is critical for QtMultimedia to work in the built executable
+        is_bundled = hasattr(sys, '_MEIPASS') or getattr(sys, 'frozen', False)
+        
+        if is_bundled:
+            try:
+                from PyQt6.QtCore import QCoreApplication
+                
+                # Try multiple possible plugin locations
+                possible_plugin_paths = [
+                    os.path.join(PROJECT_ROOT, 'PyQt6', 'Qt6', 'plugins'),
+                    os.path.join(PROJECT_ROOT, 'plugins'),
+                    os.path.join(EXE_DIR, 'PyQt6', 'Qt6', 'plugins'),
+                    os.path.join(EXE_DIR, 'plugins'),
+                    # For Nuitka, plugins might be in the same directory as the executable
+                    os.path.join(os.path.dirname(EXE_DIR), 'PyQt6', 'Qt6', 'plugins'),
+                ]
+                
+                plugin_path_found = None
+                for plugin_path in possible_plugin_paths:
+                    if os.path.exists(plugin_path):
+                        # Check if multimedia plugin exists
+                        multimedia_path = os.path.join(plugin_path, 'multimedia')
+                        if os.path.exists(multimedia_path):
+                            QCoreApplication.setLibraryPaths([plugin_path])
+                            print(f"Qt plugin path set to: {plugin_path}")
+                            plugin_path_found = plugin_path
+                            break
+                
+                if not plugin_path_found:
+                    # Try to find Qt installation and use its plugins
+                    try:
+                        import PyQt6
+                        pyqt6_path = os.path.dirname(PyQt6.__file__)
+                        qt_plugins_path = os.path.join(pyqt6_path, 'Qt6', 'plugins')
+                        if os.path.exists(qt_plugins_path):
+                            QCoreApplication.setLibraryPaths([qt_plugins_path])
+                            print(f"Qt plugin path set to (from PyQt6 install): {qt_plugins_path}")
+                    except:
+                        pass
+                    
+                    if not plugin_path_found:
+                        print("Warning: Could not find Qt plugins directory. Video playback may not work.")
+            except Exception as e:
+                print(f"Warning: Could not set Qt plugin path: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion")  # Modern look
+        
+        window = FreeFootballAnalysisApp()
+        window.show()
+        
+        sys.exit(app.exec())
+    except Exception as e:
+        import traceback
+        error_msg = f"Error starting application: {str(e)}\n\nFull traceback:\n{traceback.format_exc()}"
+        print(error_msg, file=sys.stderr)
+        
+        # Try to show error dialog
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Application Error")
+            msg.setText(f"Failed to start application:\n{str(e)}")
+            msg.setDetailedText(traceback.format_exc())
+            msg.exec()
+        except:
+            pass
+            
+        raise
 
 
 if __name__ == "__main__":
