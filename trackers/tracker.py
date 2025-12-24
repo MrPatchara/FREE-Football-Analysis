@@ -1,14 +1,33 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, TYPE_CHECKING
 import time
 from datetime import datetime
 import numpy as np
 import pandas as pd
-import ultralytics
+# Lazy import ultralytics to avoid DLL loading issues at import time
+# ultralytics will be imported in Tracker.__init__ when actually needed
 import supervision as sv
 from utils import ellipse, triangle, ball_possession_box, get_device, get_center_of_bbox, get_foot_position, options
+import os
+import sys
 
-file_handler = logging.FileHandler("logs/tracking.log")
+# Type hints only - won't be evaluated at runtime
+if TYPE_CHECKING:
+    import ultralytics
+
+# Get log directory path - works in both dev and PyInstaller bundle mode
+if hasattr(sys, '_MEIPASS'):
+    # PyInstaller bundle mode - use executable directory
+    log_dir = os.path.join(os.path.dirname(sys.executable), "logs")
+else:
+    # Development mode - use current directory
+    log_dir = "logs"
+
+# Create logs directory if it doesn't exist
+os.makedirs(log_dir, exist_ok=True)
+
+log_file = os.path.join(log_dir, "tracking.log")
+file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -27,6 +46,53 @@ class Tracker:
     """
     def __init__(self, model_path: str, classes: List[int], verbose: bool=True, 
                  batch_size: int = None, use_half_precision: bool = True) -> None: 
+        # Lazy import ultralytics to avoid DLL loading issues at module import time
+        # Note: This will trigger torch import which may cause DLL loading issues
+        # Try to pre-load torch DLLs to help with Windows signature validation
+        
+        # Pre-load torch DLLs if in PyInstaller bundle mode
+        if hasattr(sys, '_MEIPASS'):
+            try:
+                torch_lib_path = os.path.join(sys._MEIPASS, 'torch', 'lib')
+                if os.path.exists(torch_lib_path):
+                    # Add to PATH
+                    current_path = os.environ.get('PATH', '')
+                    if torch_lib_path not in current_path:
+                        os.environ['PATH'] = torch_lib_path + os.pathsep + current_path
+                    # Add to DLL search path
+                    try:
+                        os.add_dll_directory(torch_lib_path)
+                    except (OSError, AttributeError):
+                        pass
+            except Exception:
+                pass  # Continue even if pre-loading fails
+        
+        try:
+            if verbose:
+                logger.info("Importing ultralytics (this may trigger torch import)...")
+                print("Importing ultralytics...", flush=True)
+            
+            # Try importing torch first to validate DLLs
+            try:
+                import torch
+                if verbose:
+                    logger.info("torch imported successfully")
+            except Exception as torch_error:
+                if verbose:
+                    logger.warning(f"torch import warning: {torch_error}")
+            
+            # Now import ultralytics
+            import ultralytics
+            if verbose:
+                logger.info("ultralytics imported successfully")
+        except Exception as e:
+            import traceback
+            error_msg = f"Failed to import ultralytics: {e}\nFull traceback:\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            print(f"ERROR: Failed to import ultralytics: {e}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+            raise ImportError(f"Could not import ultralytics. This is required for tracking. Error: {e}")
+        
         self.model = ultralytics.YOLO(model_path)
         # Enable half precision for faster inference (FP16)
         if use_half_precision:
@@ -67,7 +133,7 @@ class Tracker:
 
         return ball_positions
 
-    def detect_frames(self, frames: List[np.ndarray], batch_size: int=None) -> List[ultralytics.engine.results.Results]:
+    def detect_frames(self, frames: List[np.ndarray], batch_size: int=None) -> List:  # Returns List[ultralytics.engine.results.Results]
         """
         List of frame predictions processed in batches to avoid memory issues.
         Optimized for speed with adaptive batch sizing and half precision.

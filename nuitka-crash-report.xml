@@ -1,0 +1,78 @@
+<?xml version='1.0' encoding='utf8'?>
+<nuitka-compilation-report nuitka_version="2.8.9" nuitka_commercial_version="not installed" mode="standalone" completion="error exit message (1)" exit_message="pyqt6: Error, there is no Qt plugin family 'mediaservice' (only OrderedSet(['PyQt6', 'assetimporters', 'generic', 'geometryloaders', 'help', 'iconengines', 'imageformats', 'multimedia', 'networkinformation', 'platforms', 'position', 'qmllint', 'qmlls', 'renderers', 'sceneparsers', 'scxmldatamodel', 'sensors', 'sqldrivers', 'styles', 'texttospeech', 'tls', 'webview'])).">
+  <performance>
+    <memory_usage name="after_launch" value="58712064" />
+  </performance>
+  <data_composer blob_size="None" />
+  <command_line>
+    <option value="--standalone" />
+    <option value="--windows-console-mode=force" />
+    <option value="--jobs=16" />
+    <option value="--assume-yes-for-downloads" />
+    <option value="--enable-plugin=pyqt6" />
+    <option value="--include-qt-plugins=multimedia,mediaservice" />
+    <option value="--include-module=torch" />
+    <option value="--include-module=ultralytics" />
+    <option value="--include-module=cv2" />
+    <option value="--include-module=numpy" />
+    <option value="--include-module=pandas" />
+    <option value="--include-module=sklearn" />
+    <option value="--include-module=scipy" />
+    <option value="--include-module=matplotlib" />
+    <option value="--include-module=openpyxl" />
+    <option value="--include-module=supervision" />
+    <option value="--include-module=roboflow" />
+    <option value="--include-package-data=ultralytics" />
+    <option value="--include-package-data=torch" />
+    <option value="--include-data-dir=models=models" />
+    <option value="--include-data-dir=frontend=frontend" />
+    <option value="--include-data-dir=demos=demos" />
+    <option value="--include-data-file=translations.xlsx=translations.xlsx" />
+    <option value="--include-data-file=openh264-1.8.0-win64.dll=openh264-1.8.0-win64.dll" />
+    <option value="--windows-icon-from-ico=football.ico" />
+    <option value="--output-dir=Build V1.0.0\dist" />
+    <option value="--output-filename=FREE_Football_Analysis.exe" />
+    <option value="--show-progress" />
+    <option value="--show-memory" />
+    <option value="run_desktop_app.py" />
+  </command_line>
+  <plugins>
+    <plugin name="anti-bloat" user_enabled="no" />
+    <plugin name="data-files" user_enabled="no" />
+    <plugin name="delvewheel" user_enabled="no" />
+    <plugin name="dll-files" user_enabled="no" />
+    <plugin name="eventlet" user_enabled="no" />
+    <plugin name="gevent" user_enabled="no" />
+    <plugin name="gi" user_enabled="no" />
+    <plugin name="glfw" user_enabled="no" />
+    <plugin name="implicit-imports" user_enabled="no" />
+    <plugin name="kivy" user_enabled="no" />
+    <plugin name="matplotlib" user_enabled="no" />
+    <plugin name="multiprocessing" user_enabled="no" />
+    <plugin name="options-nanny" user_enabled="no" />
+    <plugin name="pbr-compat" user_enabled="no" />
+    <plugin name="pkg-resources" user_enabled="no" />
+    <plugin name="playwright" user_enabled="no" />
+    <plugin name="pyqt6" user_enabled="yes" />
+    <plugin name="pywebview" user_enabled="no" />
+    <plugin name="spacy" user_enabled="no" />
+    <plugin name="transformers" user_enabled="no" />
+  </plugins>
+  <distributions />
+  <python python_exe="${sys.prefix}\python.exe" python_flavor="CPython Official" python_version="3.11.3" os_name="Windows" os_release="11" arch_name="x86_64" filesystem_encoding="utf-8">
+    <search_path>
+      <path value="${cwd}" />
+      <path value="${sys.prefix}\DLLs" />
+      <path value="${sys.prefix}\Lib" />
+      <path value="${sys.prefix}" />
+      <path value="~\AppData\Roaming\Python\Python311\site-packages" />
+      <path value="C:\Github\freemocap-main\freemocap-main" />
+      <path value="~\AppData\Roaming\Python\Python311\site-packages\win32" />
+      <path value="~\AppData\Roaming\Python\Python311\site-packages\win32\lib" />
+      <path value="~\AppData\Roaming\Python\Python311\site-packages\Pythonwin" />
+      <path value="${sys.prefix}\Lib\site-packages" />
+      <path value="~\AppData\Roaming\Python\Python311\site-packages\setuptools\_vendor" />
+    </search_path>
+  </python>
+  <output run_filename="failed too early" />
+</nuitka-compilation-report>

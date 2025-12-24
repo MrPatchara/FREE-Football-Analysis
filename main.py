@@ -1,5 +1,6 @@
 from typing import Union, List, Optional
 import os
+import sys
 import argparse
 import warnings
 from utils import read_video, save_video, options
@@ -8,6 +9,17 @@ from team_assignment import TeamAssigner
 from player_ball_assignment import PlayerBallAssigner
 from camera_movement import CameraMovementEstimator
 from referee_filter import RefereeFilter
+
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Development mode
+        base_path = os.path.abspath(os.path.dirname(__file__))
+    
+    return os.path.join(base_path, relative_path)
 
 def process_video(data: Union[str, bytes], classes: List[int], verbose: bool=True, output_path: Optional[str] = None, return_tracks: bool = False) -> Union[str, tuple]:
     """
@@ -27,7 +39,9 @@ def process_video(data: Union[str, bytes], classes: List[int], verbose: bool=Tru
     
     frames, fps, _, _ = read_video(data, verbose)
 
-    tracker = Tracker("models/best.pt", classes, verbose)
+    # Get model path (works in both dev and PyInstaller bundle mode)
+    model_path = get_resource_path("models/best.pt")
+    tracker = Tracker(model_path, classes, verbose)
     tracks = tracker.get_object_tracks(frames)
     tracker.add_position_to_tracks(tracks)
 
@@ -61,7 +75,27 @@ def process_video(data: Union[str, bytes], classes: List[int], verbose: bool=Tru
     # Generate output filename with timestamp
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"output/output_{timestamp}.mp4"
+        # Use absolute path - prefer executable directory in PyInstaller bundle mode
+        if hasattr(sys, '_MEIPASS'):
+            # PyInstaller bundle mode - save to executable directory
+            exe_dir = os.path.dirname(sys.executable)
+            output_dir = os.path.join(exe_dir, "output")
+        else:
+            # Development mode - save to project output directory
+            output_dir = "output"
+        
+        # Create output directory if it doesn't exist
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            if verbose:
+                print(f"Output directory: {output_dir}")
+        except Exception as e:
+            if verbose:
+                print(f"Warning: Could not create output directory {output_dir}: {e}")
+            # Fallback to current directory
+            output_dir = "."
+        
+        output_path = os.path.join(output_dir, f"output_{timestamp}.mp4")
     
     save_video(output, output_path, fps, verbose)
     

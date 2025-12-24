@@ -1,0 +1,100 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║                  ⚽ FREE FOOTBALL ANALYSIS v1.0.0 ⚽                         ║
+║                                                                              ║
+║         Automated Football Match Analysis Software                           ║
+║     Powered by Computer Vision & Deep Learning Technologies                 ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+Welcome to the FREE Football Analysis Installation Wizard!
+
+This wizard will guide you through the installation process of FREE Football 
+Analysis on your computer. Please take a moment to review the following 
+information before proceeding.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SYSTEM REQUIREMENTS
+═══════════════════════════════════════════════════════════════════════════════
+
+Before installing, please ensure your system meets the following requirements:
+
+  • Operating System: Windows 10 or later
+  • Processor: Multi-core CPU (recommended)
+  • Memory: 4 GB RAM minimum (8 GB recommended)
+  • Storage: At least 2 GB of free disk space
+  • Graphics: DirectX compatible graphics card (optional but recommended)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  WHAT WILL BE INSTALLED
+═══════════════════════════════════════════════════════════════════════════════
+
+FREE Football Analysis includes the following features:
+
+  ✓ Advanced ball detection and tracking with position interpolation
+  ✓ Individual player identification and tracking by unique ID
+  ✓ Automatic team separation using intelligent jersey color analysis
+  ✓ Specialized goalkeeper detection and tracking
+  ✓ Intelligent referee filtering from player tracks
+  ✓ Real-time ball possession tracking and statistics
+  ✓ Camera movement compensation for accurate positioning
+  ✓ Comprehensive match statistics overlay on video output
+  ✓ Modern desktop interface with intuitive controls
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  TECHNICAL SPECIFICATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+This software utilizes state-of-the-art technologies:
+
+  • YOLOv5 Custom Model - Trained specifically for football analysis
+  • ByteTrack - Advanced multi-object tracking algorithm
+  • KMeans Clustering - Team assignment based on jersey colors
+  • Optical Flow - Camera movement estimation
+  • PyQt6 - Modern desktop application framework
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  PRE-INSTALLATION NOTES
+═══════════════════════════════════════════════════════════════════════════════
+
+• Please close any running instances of FREE Football Analysis before 
+  proceeding with the installation.
+
+• If you are upgrading from a previous version, your configuration files 
+  will be preserved.
+
+• Ensure you have administrator privileges to complete the installation.
+
+• The installation process may take several minutes depending on your 
+  system specifications.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SOFTWARE INFORMATION
+═══════════════════════════════════════════════════════════════════════════════
+
+  Developer:        Patchara Al-umaree
+  Version:          1.0.0
+  License:          MIT License
+  Project Home:     https://github.com/MrPatchara
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+
+Click "Next" to continue with the installation process.
+
+If you would like to review or change any installation settings, please click 
+"Next" and modify your preferences on the following pages.
+
+
+Thank you for choosing FREE Football Analysis!
+
+
+═══════════════════════════════════════════════════════════════════════════════
+

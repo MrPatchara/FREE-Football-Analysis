@@ -1,0 +1,146 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║           ✓ FREE FOOTBALL ANALYSIS INSTALLATION COMPLETE ✓                  ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+Congratulations! FREE Football Analysis has been successfully installed on 
+your computer.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  INSTALLATION SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✓ Application files have been installed
+  ✓ Desktop shortcuts have been created (if selected)
+  ✓ Start menu entries have been added (if selected)
+  ✓ File associations have been configured (if applicable)
+  ✓ All components are ready to use
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  GETTING STARTED
+═══════════════════════════════════════════════════════════════════════════════
+
+To launch FREE Football Analysis, you can:
+
+  1. Double-click the desktop shortcut, or
+  2. Find it in your Start Menu under "FREE Football Analysis", or
+  3. Use the search function in Windows and type "FREE Football Analysis"
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  QUICK START GUIDE
+═══════════════════════════════════════════════════════════════════════════════
+
+First Time Using the Application:
+
+  1. Launch FREE Football Analysis from your desktop or Start Menu
+
+  2. Configure Tracking Options:
+     • Select what you want to track: players, goalkeepers, referees, ball
+     • Enable statistics display if desired
+
+  3. Select Video Source:
+     • Choose from demo videos, or
+     • Upload your own MP4 video file
+
+  4. Start Analysis:
+     • Click the "Start Analysis" button
+     • Monitor progress in real-time
+     • View results in the built-in player
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  KEY FEATURES
+═══════════════════════════════════════════════════════════════════════════════
+
+Your installation includes:
+
+  ⚽ Advanced Ball Tracking
+     Precise detection and tracking with intelligent position interpolation
+
+  👥 Player Tracking
+     Individual player identification and tracking by unique ID
+
+  🏆 Team Assignment
+     Automatic team separation using KMeans clustering on jersey colors
+
+  🥅 Goalkeeper Detection
+     Specialized goalkeeper identification and tracking
+
+  📊 Statistics & Analytics
+     Real-time ball possession tracking and comprehensive match statistics
+
+  📹 Camera Movement Compensation
+     Optical flow-based estimation for accurate object positioning
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  OUTPUT LOCATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+Results and files will be saved to:
+
+  • Processed Videos:      [Installation Directory]\output\
+  • Log Files:             [Installation Directory]\logs\
+  • Heatmaps:              [Installation Directory]\output\
+  • Statistics:            [Installation Directory]\output\
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SUPPORT & DOCUMENTATION
+═══════════════════════════════════════════════════════════════════════════════
+
+Need Help?
+
+  • Check the README files included in the installation directory
+  • Visit the project repository: 
+    https://github.com/MrPatchara/football-computer-vision
+  • Report bugs or request features through GitHub Issues
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SYSTEM RECOMMENDATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+For optimal performance:
+
+  • Use MP4 video format for input files
+  • Ensure videos have stable camera angles (minimal camera movement)
+  • Close unnecessary applications to free up system resources
+  • Use a dedicated graphics card if available for faster processing
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SOFTWARE INFORMATION
+═══════════════════════════════════════════════════════════════════════════════
+
+  Developer:        Patchara Al-umaree
+  Version:          1.0.0
+  License:          MIT License
+  Project Home:     https://github.com/MrPatchara
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  NEXT STEPS
+═══════════════════════════════════════════════════════════════════════════════
+
+✓ Check the box below to launch FREE Football Analysis now, or
+✓ Click "Finish" to exit the installation wizard
+
+
+Thank you for installing FREE Football Analysis!
+
+We hope you enjoy using this powerful tool for analyzing football matches. 
+If you have any questions or feedback, please don't hesitate to reach out.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+                              Happy Analyzing! ⚽
+
+═══════════════════════════════════════════════════════════════════════════════
+

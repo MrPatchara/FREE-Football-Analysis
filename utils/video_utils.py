@@ -5,8 +5,22 @@ import time
 from datetime import datetime
 import logging
 import tempfile
+import os
+import sys
 
-file_handler = logging.FileHandler("logs/memory_access.log")
+# Get log directory path - works in both dev and PyInstaller bundle mode
+if hasattr(sys, '_MEIPASS'):
+    # PyInstaller bundle mode - use executable directory
+    log_dir = os.path.join(os.path.dirname(sys.executable), "logs")
+else:
+    # Development mode - use current directory
+    log_dir = "logs"
+
+# Create logs directory if it doesn't exist
+os.makedirs(log_dir, exist_ok=True)
+
+log_file = os.path.join(log_dir, "memory_access.log")
+file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
